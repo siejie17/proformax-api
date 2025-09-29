@@ -98,8 +98,9 @@ class AuthController extends Controller
             }
         );
 
+        // AuthController.php
         return $status === Password::PASSWORD_RESET
-            ? redirect()->route('login')->with('status', __($status))
+            ? redirect()->route('password.reset.success')->with('reset_success', true)
             : back()->withErrors(['email' => [__($status)]]);
     }
 
@@ -119,12 +120,16 @@ class AuthController extends Controller
             ->where('email', $email)
             ->first();
 
+        if (! $record || ! hash_equals($record->token, $token)) {
+            return redirect()->route('link.expired')->with('reset_expired', true);
+        }
+
         // Check expiry (default 60 minutes from created_at)
         if (Carbon::parse($record->created_at)
             ->addMinutes(config('auth.passwords.users.expire'))
             ->isPast()
         ) {
-            return redirect()->route('password.expired');
+            return redirect()->route('link.expired')->with('reset_expired', true);
         }
 
         // Token valid → show form

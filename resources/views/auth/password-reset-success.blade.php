@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ProFormaX - Link Expired</title>
+    <title>ProFormaX - Password Reset Successful</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 
@@ -15,20 +15,20 @@
             <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
                 <!-- Icon -->
                 <div class="text-center mb-6">
-                    <div class="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
-                        <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div class="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4">
+                        <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.232 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                         </svg>
                     </div>
 
                     <!-- Title -->
-                    <h1 class="text-2xl font-bold text-gray-900 mb-2">Link Expired</h1>
+                    <h1 class="text-2xl font-bold text-gray-900 mb-2">Password Reset Successful</h1>
 
                     <!-- Description -->
                     <div class="text-gray-600 leading-relaxed">
-                        <p class="mb-3">This password reset link has expired.</p>
-                        <p>Please request a new password reset link to continue.</p>
+                        <p class="mb-3">Your password has been successfully updated.</p>
+                        <p>You can now return to the app and log in with your new password.</p>
                     </div>
                 </div>
 
@@ -38,9 +38,11 @@
                 <!-- Footer Note -->
                 <div>
                     <p class="text-sm text-gray-500 text-center">
-                        Security links expire for your protection
+                        Your account is now secure with the new password
                     </p>
                 </div>
+
+                <div class="border-t border-gray-200 mt-4 mb-2"></div>
             </div>
         </div>
     </div>

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reset Password</title>
+    <title>ProFormaX - Reset Password</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 
@@ -39,7 +39,7 @@
                             <label for="email" class="block text-sm font-medium text-gray-700 mb-2">
                                 Email Address
                             </label>
-                            <input id="email" name="email" type="email" value=""
+                            <input id="email" name="email" type="email" value="{{ $email ?? old('email') }}"
                                 readonly
                                 class="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 text-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all duration-200">
                             @error('email')
