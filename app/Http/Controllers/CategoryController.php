@@ -19,6 +19,7 @@ class CategoryController extends Controller
         // Transform to desired structure
         return $buildingTypes->map(function ($bt) {
             return [
+                'id' => $bt->id,
                 'building_type' => $bt->name,
                 'categories' => $bt->categories->map(function ($cat) {
                     return [

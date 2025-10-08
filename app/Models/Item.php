@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class Item extends Model
 {
-    protected $fillable = ['description', 'info', 'marks', 'subitems_exist', 'criteria_id', 'subcriteria_id'];
+    protected $fillable = ['description', 'info', 'marks', 'subitems_exist', 'subcriterion_id', 'criterion_id'];
     
     public function criterion()
     {
@@ -20,7 +20,7 @@ class Item extends Model
 
     public function subitems()
     {
-        return $this->hasMany(Subitem::class);
+        return $this->hasMany(Subitem::class, 'item_id');
     }
 
     public function userAnswers()

@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\ResultsController;
 use App\Models\User;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Foundation\Auth\EmailVerificationRequest;
@@ -38,3 +39,5 @@ Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
 
 Route::get('/categories', [CategoryController::class, 'index']);
+
+Route::post('/results', [ResultsController::class, 'getResults']);

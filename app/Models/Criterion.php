@@ -15,11 +15,11 @@ class Criterion extends Model
 
     public function subcriteria()
     {
-        return $this->hasMany(Subcriterion::class);
+        return $this->hasMany(Subcriterion::class, 'criterion_id');
     }
 
     public function items()
     {
-        return $this->hasMany(Item::class); // items directly under criteria
+        return $this->hasMany(Item::class, 'criterion_id')->whereNull('subcriterion_id');
     }
 }
