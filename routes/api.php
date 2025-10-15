@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\ResultsController;
+use App\Http\Controllers\UserController;
 use App\Models\User;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Foundation\Auth\EmailVerificationRequest;
@@ -30,6 +31,13 @@ Route::post('/email/verification-notification', function (Request $request) {
 Route::get('/profile', function (Request $request) {
     return response()->json($request->user());
 })->middleware(['auth:sanctum', 'verified']);
+
+Route::middleware('auth:sanctum')->put('/user/update-profile-pic', [UserController::class, 'updateImage']);
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::patch('/user/profile', [UserController::class, 'updateProfile']);
+    Route::put('/user/update-password', [UserController::class, 'updatePassword']);
+});
 
 Route::post('/login', [AuthController::class, 'login']);
 

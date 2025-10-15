@@ -11,6 +11,11 @@ class Project extends Model
         return $this->belongsTo(BuildingType::class);
     }
 
+    public function structure()
+    {
+        return $this->belongsTo(Structure::class);
+    }
+
     public function user()
     {
         return $this->belongsTo(User::class);
