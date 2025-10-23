@@ -86,7 +86,7 @@ class CostCalculationService
         return round($costBeforeLocationAdjustment, 2);
     }
 
-    public function getDetailedConstructionCost(string $category, float $buildingSize, int $year, string $location, string $structure, string $certifiedRatingScale): array
+    public function getDetailedConstructionCost(string $category, float $buildingSize, int $year, string $location, string $structure)
     {
         $prevProjects = config('prevProjects');
         $locationMultipliers = config('locationIndex');
@@ -102,8 +102,13 @@ class CostCalculationService
         $tpi = $this->getLatestTpiValue($tpiData, $year) / $tpiData[$project['year']];
 
         $totalCost = 0;
+
+        if (!isset($project['cost_breakdown'])) {
+            return [];
+        }
+
         foreach ($project['cost_breakdown'] as $key => &$node) {
-            $nodeCost = $this->calculateNodeCost($node, $buildingSize, $locationIndex, $tpi, $node['gfa']);
+            $nodeCost = $this->calculateNodeCost($node, $buildingSize, $locationIndex, $tpi);
             $node['cost'] = round($nodeCost, 2);
             $totalCost += $nodeCost;
         }
@@ -118,20 +123,20 @@ class CostCalculationService
         return $new_project;
     }
 
-    private function calculateNodeCost(&$node, $buildingSize, $locationIndex, $tpi, $parentGfa = null): float
+    private function calculateNodeCost(&$node, $buildingSize, $locationIndex, $tpi): float
     {
-        $currentGfa = $node['gfa'] ?? $parentGfa;
-
-        if (isset($node['cost']) && !isset($node['children'])) {
-            $costPerMeter = $node['cost'] / $currentGfa;
-            return round($costPerMeter * $buildingSize * $tpi * $locationIndex, 2);
+        if (isset($node['cost_per_gfa']) && !isset($node['children'])) {
+            $cost = round($node['cost_per_gfa'] * $buildingSize * $tpi * $locationIndex, 2);
+            unset($node['cost_per_gfa']);
+            return $cost;
         }
 
         $total = 0;
         if (isset($node['children'])) {
             foreach ($node['children'] as $key => &$child) {
-                $childCost = $this->calculateNodeCost($child, $buildingSize, $locationIndex, $tpi, $currentGfa);
+                $childCost = $this->calculateNodeCost($child, $buildingSize, $locationIndex, $tpi);
                 $child['cost'] = $childCost;
+                unset($child['cost_per_gfa']);
                 $total += $childCost;
             }
         }

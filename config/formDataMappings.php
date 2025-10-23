@@ -83,5 +83,20 @@ return [
         'Gold (76 - 85)' => 'Gold',
         'Silver (66 - 75)' => 'Silver',
         'Certified (50 - 65)' => 'Certified',
+    ],
+
+    'locations_reverse' => [
+        'A' => 'Pulau Pinang',
+        'B' => 'Perak',
+        'C' => 'Selangor',
+        'D' => 'Johor',
+        'E' => 'Pahang',
+        'F' => 'Kelantan',
+        'G' => 'Kota Kinabalu',
+        'H' => 'Sandakan',
+        'I' => 'Tawau',
+        'J' => 'Kuching',
+        'K' => 'Sibu',
+        'L' => 'Miri',
     ]
 ];

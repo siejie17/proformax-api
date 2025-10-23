@@ -7,6 +7,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\ResultsController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\ProjectController;
 use App\Models\User;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Foundation\Auth\EmailVerificationRequest;
@@ -49,3 +50,11 @@ Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanc
 Route::get('/categories', [CategoryController::class, 'index']);
 
 Route::post('/results', [ResultsController::class, 'getResults']);
+
+Route::post('/submit-assessment', [ResultsController::class, 'submitAssessment']);
+
+Route::get('/users/{userId}/projects', [ProjectController::class, 'getUserProjects']);
+
+Route::get('/projects/{projectId}', [ProjectController::class, 'showSelectedProject']);
+
+Route::get('/users/{userId}', [UserController::class, 'getUserById']);

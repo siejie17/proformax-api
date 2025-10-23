@@ -18,12 +18,13 @@ return new class extends Migration
             $table->decimal('size', 15, 2);
             $table->year('year');
             $table->string('location');
-            $table->string('structure');
+            $table->foreignId('structure_id')->constrained('structures')->cascadeOnDelete();
             $table->timestamps();
             $table->integer('rating')->default(0);
             $table->decimal('budget', 15, 2)->nullable();
             $table->decimal('adjusted_cost', 15, 2)->nullable();
             $table->enum('cost_preview_way', ["Brief", "Detailed"]);
+            $table->string('target_certification')->nullable();
             $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
         });
     }

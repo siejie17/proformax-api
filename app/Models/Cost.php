@@ -6,6 +6,17 @@ use Illuminate\Database\Eloquent\Model;
 
 class Cost extends Model
 {
+    protected $fillable = [
+        'project_id',
+        'code',
+        'description',
+        'item_cost',
+        'parent_id',
+        'level',
+    ];
+    
+    public $timestamps = false;
+
     public function project()
     {
         return $this->belongsTo(Project::class);

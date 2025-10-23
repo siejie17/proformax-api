@@ -30,6 +30,7 @@ class FormDataMappingService
         $mapped['certifiedRatingScale'] = $this->mapRatingScale($formData['certifiedRatingScale']);
         
         // Keep other fields as-is
+        $mapped['projectName'] = $formData['projectName'];
         $mapped['buildingType'] = $formData['buildingType'] === 'Non-Residential New Construction (NRNC)' ? 1 : 2;
         $mapped['category'] = $formData['category'];
         $mapped['year'] = $formData['year'];

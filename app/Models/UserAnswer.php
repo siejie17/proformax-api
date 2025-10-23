@@ -6,6 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 
 class UserAnswer extends Model
 {
+    protected $fillable = [
+        'user_id',
+        'item_id',
+        'subitem_id',
+        'custom_answer',
+        'project_id',
+    ];
+    
+    public $timestamps = false;
+
     public function user()
     {
         return $this->belongsTo(User::class);

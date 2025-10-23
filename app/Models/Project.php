@@ -6,6 +6,25 @@ use Illuminate\Database\Eloquent\Model;
 
 class Project extends Model
 {
+    protected $fillable = [
+        'user_id',
+        'name',
+        'building_type_id',
+        'category',
+        'size',
+        'year',
+        'location',
+        'structure_id',
+        'cost_preview_way',
+        'budget',
+        'adjusted_cost',
+        'rating',
+        'target_certification',
+        'created_at',
+    ];
+
+    public $timestamps = false;
+
     public function buildingType()
     {
         return $this->belongsTo(BuildingType::class);

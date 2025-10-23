@@ -10,6 +10,23 @@ use Illuminate\Support\Facades\Validator;
 
 class UserController extends Controller
 {
+    public function getUserById($userId): JsonResponse
+    {
+        $user = DB::table('users')->where('id', $userId)->first();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found.'
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'user' => $user
+        ]);
+    }
+    
     public function updateImage(Request $request)
     {
         $request->validate([
