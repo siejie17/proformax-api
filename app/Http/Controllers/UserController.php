@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -122,5 +123,75 @@ class UserController extends Controller
             'success' => true,
             'message' => 'Password updated successfully.'
         ]);
+    }
+
+    /**
+     * Update user preferences
+     * PATCH /users/{userId}/preferences
+     */
+    public function updatePreferences(Request $request, $userId)
+    {
+        try {
+            $user = User::findOrFail($userId);
+
+            // Define allowed preference fields
+            $allowedPreferences = [
+                'email_notifications',
+                'push_notifications'
+            ];
+
+            $validatedData = $request->validate([
+                'email_notifications' => 'sometimes|boolean',
+                'push_notifications' => 'sometimes|boolean',
+            ]);
+
+            // Update preferences (either create or update)
+            foreach ($validatedData as $key => $value) {
+                $user->update([$key => $value]);
+            }
+
+            return response()->json([
+                'message' => 'Preferences updated successfully',
+                'status' => true,
+                'user' => $user,
+                'preferences' => [
+                    'email_notifications' => $user->email_notifications,
+                    'push_notifications' => $user->push_notifications,
+                ]
+            ], 200);
+
+        } catch (\Exception $error) {
+            return response()->json([
+                'message' => 'Error updating preferences',
+                'status' => false,
+                'error' => $error->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Fetch user preferences
+     * GET /users/{userId}/preferences
+     */
+    public function getPreferences($userId)
+    {
+        try {
+            $user = User::findOrFail($userId);
+
+            return response()->json([
+                'status' => true,
+                'preferences' => [
+                    'email_notifications' => $user->email_notifications ?? false,
+                    'push_notifications' => $user->push_notifications ?? false,
+                ]
+            ], 200);
+
+        } catch (\Exception $error) {
+            return response()->json([
+                'message' => 'Error fetching preferences',
+                'status' => false,
+                'error' => $error->getMessage()
+            ], 500);
+        }
     }
 }

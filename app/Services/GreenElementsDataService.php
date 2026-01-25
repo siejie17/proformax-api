@@ -49,6 +49,8 @@ class GreenElementsDataService
             "description"    => $item->description,
             "info"           => $item->info,
             "marks"          => $item->marks,
+            "suggestions"    => $item->suggestions,
+            "esg"            => $item->esg,
             "subitems_exist" => $item->subitems_exist,
             "subitems"       => $item->subitems->map(function ($subitem) {
                 return [

@@ -3,7 +3,10 @@
 namespace App\Services;
 
 use App\Models\Category;
+use App\Models\LocationIndex;
+use App\Models\TenderPriceIndex;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class CostCalculationService
 {
@@ -20,10 +23,10 @@ class CostCalculationService
         $certifiedRatingScale = $mappedData['certifiedRatingScale'];
         $costPreviewWay = $mappedData['costPreviewWay'];
 
-        if ($costPreviewWay === 'Brief') {
+        if ($costPreviewWay === 'Simplified') {
             return $this->getBriefConstructionCost($category, $buildingSize, $year, $location, $structure);
         }
-           
+
         return $this->getDetailedConstructionCost($category, $buildingSize, $year, $location, $structure, $certifiedRatingScale);
     }
 
@@ -51,14 +54,14 @@ class CostCalculationService
     {
         // Filter years <= requested year, then get the maximum
         $availableYears = array_filter(
-            array_keys($tpiData), 
+            array_keys($tpiData),
             fn($y) => (int)$y <= $year
         );
-        
+
         if (empty($availableYears)) {
             throw new \Exception("No TPI data available for year {$year} or earlier");
         }
-        
+
         $latestYear = max($availableYears);
         return $tpiData[$latestYear];
     }
@@ -71,14 +74,21 @@ class CostCalculationService
             throw new \Exception("Category '{$category}' not found");
         }
 
-        $tpiData = config('tpiMapping');
-        $tpi = $this->getLatestTpiValue($tpiData, $year) / $tpiData["2021"];
+        $curProjectTpi = TenderPriceIndex::where('year', '<=', $year)
+            ->orderByDesc('year')
+            ->value('index');
+        $prevProjectTpi = TenderPriceIndex::where('year', '<=', 2021)
+            ->orderByDesc('year')
+            ->value('index');
+
+        $tpi = $curProjectTpi / $prevProjectTpi;
 
         $costBeforeLocationAdjustment = $categoryData->cost_per_meter_squared * $buildingSize * $tpi;
 
         if (in_array($location, ['G', 'H', 'I', 'J', 'K', 'L'])) {
-            $locationMultipliers = config('locationIndex');
-            $multiplier = $locationMultipliers[$structure][$location] ?? 1.0;
+            $multiplier = LocationIndex::where('structure', $structure)
+            ->where('location', $location)
+            ->value('multiplier') ?? 1.0;
             return round($costBeforeLocationAdjustment * $multiplier, 2);
         }
 
@@ -88,36 +98,88 @@ class CostCalculationService
 
     public function getDetailedConstructionCost(string $category, float $buildingSize, int $year, string $location, string $structure)
     {
-        $prevProjects = config('prevProjects');
-        $locationMultipliers = config('locationIndex');
-
-        if (!isset($prevProjects[$category])) {
-            throw new \Exception("Category '{$category}' not found in previous projects");
+        $categoryId = DB::table('categories')->where('category', $category)->value('id');
+        if (!$categoryId) {
+            throw new \Exception("Category '{$category}' not found");
         }
 
-        $project = $prevProjects[$category];
-        $locationIndex = ($project['location'] !== $location) ? $locationMultipliers[$structure][$location] : 1.0;
+        $prevProject = DB::table('prev_projects')->where('category_id', $categoryId)->first();
 
-        $tpiData = config('tpiMapping');
-        $tpi = $this->getLatestTpiValue($tpiData, $year) / $tpiData[$project['year']];
+        $prevProjectLocationId = $prevProject ? $prevProject->location_id : null;
+        $prevProjectLocation = $prevProjectLocationId ? DB::table('locations')->where('id', $prevProjectLocationId)->value('code') : null;
+
+        $locationIndex = ($prevProjectLocation !== $location) ? LocationIndex::where('structure', $structure)
+            ->where('location', $location)
+            ->value('multiplier') : 1.0;
+
+        $curProjectTpi = TenderPriceIndex::where('year', '<=', $year)
+            ->orderByDesc('year')
+            ->value('index');
+        $prevProjectTpi = TenderPriceIndex::where('year', '<=', (int)$prevProject->year)
+            ->orderByDesc('year')
+            ->value('index');
+
+        $tpi = $curProjectTpi / $prevProjectTpi;
 
         $totalCost = 0;
 
-        if (!isset($project['cost_breakdown'])) {
-            return [];
+        // Build nested cost_breakdown from prev_project_costs
+        $prevProjectId = $prevProject ? $prevProject->id : null;
+        $costs = DB::table('prev_project_costs')
+            ->where('prev_project_id', $prevProjectId)
+            ->orderBy('level')
+            ->get()
+            ->toArray();
+
+        // Index by id for fast lookup
+        $costsById = [];
+        foreach ($costs as $cost) {
+            $cost->children = [];
+            $costsById[$cost->id] = $cost;
         }
 
-        foreach ($project['cost_breakdown'] as $key => &$node) {
+        // Build the tree
+        $tree = [];
+        foreach ($costs as $cost) {
+            if ($cost->parent_id) {
+                $costsById[$cost->parent_id]->children[] = $cost;
+            } else {
+                $tree[$cost->code] = $cost;
+            }
+        }
+
+        // Format to match config structure
+        function formatCostNode($node) {
+            $arr = [
+                'description' => $node->description,
+            ];
+            if ($node->cost_per_gfa !== null) {
+                $arr['cost_per_gfa'] = $node->cost_per_gfa;
+            }
+            if (!empty($node->children)) {
+                $arr['children'] = [];
+                foreach ($node->children as $child) {
+                    $arr['children'][$child->code] = formatCostNode($child);
+                }
+            }
+            return $arr;
+        }
+
+        $cost_breakdown = [];
+        foreach ($tree as $code => $node) {
+            $cost_breakdown[$code] = formatCostNode($node);
+        }
+
+        // Calculate costs as before
+        foreach ($cost_breakdown as $key => &$node) {
             $nodeCost = $this->calculateNodeCost($node, $buildingSize, $locationIndex, $tpi);
             $node['cost'] = round($nodeCost, 2);
             $totalCost += $nodeCost;
         }
 
-        $project['total_cost'] = round($totalCost, 2);
-
         $new_project = [
-            'total_cost' => $project['total_cost'],
-            'cost_breakdown' => $project['cost_breakdown'],
+            'total_cost' => round($totalCost, 2),
+            'cost_breakdown' => $cost_breakdown,
         ];
 
         return $new_project;

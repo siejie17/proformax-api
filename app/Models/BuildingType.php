@@ -20,4 +20,9 @@ class BuildingType extends Model
     {
         return $this->hasMany(Category::class);
     }
+
+    public function structures()
+    {
+        return $this->hasMany(Structure::class);
+    }
 }

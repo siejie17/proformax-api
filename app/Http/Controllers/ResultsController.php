@@ -119,15 +119,17 @@ class ResultsController extends Controller
                 }
             });
 
-            // Save costs in its own transaction
-            DB::transaction(function () use ($projectId, $costsData) {
-                try {
-                    $this->saveCostBreakdown($projectId, $costsData['cost_breakdown']);
-                } catch (Exception $e) {
-                    Log::error('Failed to save cost breakdown: ' . $e->getMessage());
-                    throw $e;
-                }
-            });
+            // Save costs in its own transaction (only if not Simplified)
+            if ($formData['costPreviewWay'] !== 'Simplified') {
+                DB::transaction(function () use ($projectId, $costsData) {
+                    try {
+                        $this->saveCostBreakdown($projectId, $costsData['cost_breakdown']);
+                    } catch (Exception $e) {
+                        Log::error('Failed to save cost breakdown: ' . $e->getMessage());
+                        throw $e;
+                    }
+                });
+            }
 
             // Save checked items and subitems in its own transaction
             DB::transaction(function () use ($projectId, $userId, $checkedItems) {
