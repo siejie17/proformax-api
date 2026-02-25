@@ -11,10 +11,6 @@ class Structure extends Model
         'code',
     ];
 
-    // protected $casts = [
-    //     'availability' => 'array',
-    // ];
-
     public function projects()
     {
         return $this->hasMany(Project::class);

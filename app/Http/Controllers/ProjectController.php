@@ -5,16 +5,19 @@ namespace App\Http\Controllers;
 use App\Models\Project;
 use App\Models\UserAnswer;
 use App\Services\GreenElementsDataService;
+use App\Services\ThreeDObjectService;
 use Exception;
 use Illuminate\Http\Request;
 
 class ProjectController extends Controller
 {
     protected $greenElementsData;
+    protected $threeDObjectService;
 
-    public function __construct(GreenElementsDataService $greenElementsData)
+    public function __construct(GreenElementsDataService $greenElementsData, ThreeDObjectService $threeDObjectService)
     {
         $this->greenElementsData = $greenElementsData;
+        $this->threeDObjectService = $threeDObjectService;
     }
 
     /**
@@ -116,6 +119,8 @@ class ProjectController extends Controller
             $projectData['building_type_name'] = $project->buildingType?->name;
             $projectData['structure'] = $project->structure?->name;
 
+            $threeDObjectsData = $this->threeDObjectService->get3DVisibilityConfig();
+
             return response()->json([
                 'success' => true,
                 'data' => array_merge($projectData, [
@@ -124,7 +129,8 @@ class ProjectController extends Controller
                     'custom_inputs' => $splitAnswers['customInputs'],
                     'cost_breakdown' => $costBreakdown,
                 ]),
-                'green_elements' => $greenElements
+                'green_elements' => $greenElements,
+                'three_d_objects' => $threeDObjectsData,
             ], 200);
         } catch (\Exception $e) {
             return response()->json([

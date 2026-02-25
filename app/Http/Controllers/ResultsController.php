@@ -3,13 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\Cost;
-use App\Models\Item;
 use App\Models\Project;
-use App\Models\Subitem;
 use App\Models\UserAnswer;
 use App\Services\CostCalculationService;
 use App\Services\FormDataMappingService;
 use App\Services\GreenElementsDataService;
+use App\Services\ThreeDObjectService;
+// use App\Services\ThreeDObjectService;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -20,13 +20,14 @@ class ResultsController extends Controller
 {
     protected $costCalculation;
     protected $greenElementsData;
-
+    protected $threeDObject;
     private $mappingService;
 
-    public function __construct(CostCalculationService $costCalculation, GreenElementsDataService $greenElementsData, FormDataMappingService $mappingService)
+    public function __construct(CostCalculationService $costCalculation, GreenElementsDataService $greenElementsData, ThreeDObjectService $threeDObject, FormDataMappingService $mappingService)
     {
         $this->costCalculation = $costCalculation;
         $this->greenElementsData = $greenElementsData;
+        $this->threeDObject = $threeDObject;
         $this->mappingService = $mappingService;
     }
 
@@ -70,9 +71,12 @@ class ResultsController extends Controller
 
             $cost = $this->costCalculation->calculateCost($mappedData);
 
+            $threeDObjects = $this->threeDObject->get3DVisibilityConfig();
+
             return response()->json([
                 'cost' => $cost,
                 'green_elements' => $greenElements,
+                'three_d_objects' => $threeDObjects,
                 'mapped_form_data' => $mappedData,
             ]);
         } catch (Exception $e) {

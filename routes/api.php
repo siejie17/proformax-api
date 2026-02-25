@@ -4,11 +4,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\AuthController;
-use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\FormController;
 use App\Http\Controllers\ResultsController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\ThreeDController;
 
 // Public routes
 Route::post('/register', [AuthController::class, 'register']);
