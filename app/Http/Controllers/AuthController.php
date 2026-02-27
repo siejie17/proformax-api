@@ -5,10 +5,13 @@ namespace App\Http\Controllers;
 use App\Models\User;
 
 use Illuminate\Http\Request;
+use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
@@ -23,23 +26,39 @@ class AuthController extends Controller
             'email'      => 'required|string|email|unique:users',
             'password'   => 'required|string|min:6',
         ]);
-
-        $user = User::create([
-            'first_name' => $request->first_name,
-            'last_name' => $request->last_name,
-            'email' => $request->email,
-            'password' => Hash::make($request->password),
-        ]);
-
-        $user->sendEmailVerificationNotification();
-
-        $token = $user->createToken('auth_token')->plainTextToken;
-
-        return response()->json([
-            'message' => 'User registered successfully. Please check your email for verification link.',
-            'user' => $user,
-            'token' => $token,
-        ], 201);
+    
+        DB::beginTransaction();
+    
+        try {
+            $user = User::create([
+                'first_name' => $request->first_name,
+                'last_name' => $request->last_name,
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+            ]);
+    
+            $user->sendEmailVerificationNotification();
+    
+            $token = $user->createToken('auth_token')->plainTextToken;
+    
+            DB::commit();
+    
+            return response()->json([
+                'message' => 'User registered successfully. Please check your email for verification link.',
+                'user' => $user,
+                'token' => $token,
+            ], 201);
+    
+        } catch (\Exception $e) {
+    
+            DB::rollBack();
+    
+            Log::error('Registration failed: ' . $e->getMessage());
+    
+            return response()->json([
+                'message' => 'Registration failed. Please try again later.'
+            ], 500);
+        }
     }
 
     /**
@@ -103,19 +122,32 @@ class AuthController extends Controller
             'token' => 'required',
             'password' => 'required|min:6|confirmed',
         ]);
-
+        
         $status = Password::reset(
             $request->only('email', 'password', 'password_confirmation', 'token'),
-            function ($user, $password) {
-                $user->password = Hash::make($password);
+            function (User $user, string $password) {
+                $user->forceFill([
+                    'password' => Hash::make($password)
+                ])->setRememberToken(Str::random(60));
+ 
                 $user->save();
+ 
+                event(new PasswordReset($user));
             }
         );
 
-        // AuthController.php
-        return $status === Password::PASSWORD_RESET
-            ? redirect()->route('password.reset.success')->with('reset_success', true)
-            : back()->withErrors(['email' => [__($status)]]);
+        // If the reset was successful
+        if ($status === Password::PasswordReset) {
+            return view('auth.password-reset-success');
+        }
+        
+        // If the token was invalid or expired...
+        if ($status === Password::INVALID_TOKEN) {
+            return redirect()->route('link.expired')->with('reset_expired', true);
+        }
+    
+        // For any other error (like user not found)
+        return back()->withErrors(['email' => [__($status)]]);
     }
 
     public function logout(Request $request)
@@ -134,7 +166,7 @@ class AuthController extends Controller
             ->where('email', $email)
             ->first();
 
-        if (! $record || ! hash_equals($record->token, $token)) {
+        if (! $record || ! Hash::check($token, $record->token)) {
             return redirect()->route('link.expired')->with('reset_expired', true);
         }
 

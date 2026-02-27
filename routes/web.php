@@ -62,10 +62,6 @@ Route::post('/reset-password', [AuthController::class, 'resetPassword'])
 
 // routes/web.php
 Route::get('/reset-password/success', function () {
-    if (! session('reset_success')) {
-        abort(404); // show 404 page
-    }
-
     return view('auth.password-reset-success');
 })->name('password.reset.success');
 
