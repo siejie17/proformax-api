@@ -83,6 +83,7 @@ return [
         'Gold (76 - 85)' => 'Gold',
         'Silver (66 - 75)' => 'Silver',
         'Certified (50 - 65)' => 'Certified',
+        'Not Certified (0 - 49)' => 'Not Certified',
     ],
 
     'locations_reverse' => [

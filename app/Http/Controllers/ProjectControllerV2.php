@@ -9,7 +9,7 @@ use App\Services\ThreeDObjectService;
 use Exception;
 use Illuminate\Http\Request;
 
-class ProjectController extends Controller
+class ProjectControllerV2 extends Controller
 {
     protected $greenElementsData;
     protected $threeDObjectService;
@@ -234,22 +234,24 @@ class ProjectController extends Controller
         $totalCost = 0.0;
 
         foreach ($children as $child) {
-            $childCost = (float) $child->item_cost;
             $data = [
                 'description' => $child->description,
-                'cost' => $childCost,
+                'cost' => 0.0,
             ];
 
             // Check if this child has its own children
             $nestedChildren = $this->getNestedChildren($costs, $child->id);
             if ($nestedChildren) {
+                // Node has children: cost is sum of children only
                 $data['children'] = $nestedChildren['children'];
-                $childCost += $nestedChildren['totalCost'];
-                $data['cost'] = $childCost;
+                $data['cost'] = $nestedChildren['totalCost'];
+            } else {
+                // Leaf node: use its actual item_cost
+                $data['cost'] = (float) $child->item_cost;
             }
 
             $childrenData[$child->code] = $data;
-            $totalCost += $childCost;
+            $totalCost += $data['cost'];
         }
 
         return [

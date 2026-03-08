@@ -10,6 +10,10 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+Route::get('/privacy-policy', function () {
+    return view('privacy-policy');
+});
+
 Route::get('/verify-email/{id}/{hash}', function (Request $request, $id, $hash) {
     $user = User::findOrFail($id);
 

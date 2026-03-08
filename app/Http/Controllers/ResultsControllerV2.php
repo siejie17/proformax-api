@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-class ResultsController extends Controller
+class ResultsControllerV2 extends Controller
 {
     protected $costCalculation;
     protected $greenElementsData;
