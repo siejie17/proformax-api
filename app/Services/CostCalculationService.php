@@ -10,93 +10,20 @@ use Illuminate\Support\Facades\DB;
 
 class CostCalculationService
 {
-    public function calculateCost(array $mappedData): array|float
+    public function calculateCost($mappedData)
     {
         // Extract form data
-        $buildingType = $mappedData['buildingType'];
         $category = $mappedData['category'];
         $year = $mappedData['year'];
         $buildingSize = $mappedData['buildingSize'];
-        $projectBudget = $mappedData['projectBudget'];
         $structure = $mappedData['structure'];
         $location = $mappedData['location'];
         $certifiedRatingScale = $mappedData['certifiedRatingScale'];
-        $costPreviewWay = $mappedData['costPreviewWay'];
 
-        if ($costPreviewWay === 'Simplified') {
-            return $this->getBriefConstructionCost($category, $buildingSize, $year, $location, $structure);
-        }
-
-        return $this->getDetailedConstructionCost($category, $buildingSize, $year, $location, $structure, $certifiedRatingScale);
+        return $this->getConstructionCost($category, $buildingSize, $year, $location, $structure, $certifiedRatingScale);
     }
 
-    /**
-     * Get category data matched by category column
-     *
-     * @param string $category
-     * @return Category|null
-     */
-    public function getCategoryByName(string $category): ?Category
-    {
-        return Category::where('category', $category)->first();
-    }
-
-    /**
-     * Get the latest available TPI value for the given year
-     * If the exact year is not available, returns the latest year that is <= requested year
-     *
-     * @param array $tpiData
-     * @param int $year
-     * @return float
-     * @throws \Exception
-     */
-    private function getLatestTpiValue(array $tpiData, int $year): float
-    {
-        // Filter years <= requested year, then get the maximum
-        $availableYears = array_filter(
-            array_keys($tpiData),
-            fn($y) => (int)$y <= $year
-        );
-
-        if (empty($availableYears)) {
-            throw new \Exception("No TPI data available for year {$year} or earlier");
-        }
-
-        $latestYear = max($availableYears);
-        return $tpiData[$latestYear];
-    }
-
-    public function getBriefConstructionCost(string $category, float $buildingSize, int $year, string $location, string $structure): float
-    {
-        $categoryData = Category::where('category', $category)->first();
-
-        if (!$categoryData) {
-            throw new \Exception("Category '{$category}' not found");
-        }
-
-        $curProjectTpi = TenderPriceIndex::where('year', '<=', $year)
-            ->orderByDesc('year')
-            ->value('index');
-        $prevProjectTpi = TenderPriceIndex::where('year', '<=', 2021)
-            ->orderByDesc('year')
-            ->value('index');
-
-        $tpi = $curProjectTpi / $prevProjectTpi;
-
-        $costBeforeLocationAdjustment = $categoryData->cost_per_meter_squared * $buildingSize * $tpi;
-
-        if (in_array($location, ['G', 'H', 'I', 'J', 'K', 'L'])) {
-            $multiplier = LocationIndex::where('structure', $structure)
-            ->where('location', $location)
-            ->value('multiplier') ?? 1.0;
-            return round($costBeforeLocationAdjustment * $multiplier, 2);
-        }
-
-        // Calculate brief construction cost based on category data
-        return round($costBeforeLocationAdjustment, 2);
-    }
-
-    public function getDetailedConstructionCost(string $category, float $buildingSize, int $year, string $location, string $structure)
+    public function getConstructionCost(string $category, float $buildingSize, int $year, string $location, string $structure)
     {
         $categoryId = DB::table('categories')->where('category', $category)->value('id');
         if (!$categoryId) {
@@ -149,7 +76,8 @@ class CostCalculationService
         }
 
         // Format to match config structure
-        function formatCostNode($node) {
+        function formatCostNode($node)
+        {
             $arr = [
                 'description' => $node->description,
             ];
@@ -169,6 +97,8 @@ class CostCalculationService
         foreach ($tree as $code => $node) {
             $cost_breakdown[$code] = formatCostNode($node);
         }
+
+        ksort($cost_breakdown, SORT_NATURAL | SORT_FLAG_CASE);
 
         // Calculate costs as before
         foreach ($cost_breakdown as $key => &$node) {

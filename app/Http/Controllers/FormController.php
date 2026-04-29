@@ -20,6 +20,31 @@ class FormController extends Controller
                 $type->name => $type->categories->pluck('category')->values()
             ]);
 
+        $classifications = BuildingType::with('classifications')
+            ->select('id', 'name', 'code')
+            ->get()
+            ->mapWithKeys(fn($type) => [
+                $type->name => $type->classifications->map(fn($classification) => [
+                    'name' => $classification->name,
+                    'description' => $classification->description
+                ])->values()
+            ]);
+
+        $ratingScales = BuildingType::with('certifications')
+            ->select('id', 'name', 'code')
+            ->get()
+            ->mapWithKeys(function ($type) {
+                return [
+                    $type->name => $type->certifications
+                        ->mapWithKeys(function ($cert) {
+                            return [
+                                $cert->display_name => $cert->name
+                            ];
+                        })
+                        ->toArray()
+                ];
+            });
+
         $allStructures = Structure::with('buildingType')->get();
         $structures = [];
 
@@ -47,9 +72,11 @@ class FormController extends Controller
         return response()->json([
             'buildingTypes' => $buildingTypes,
             'categories' => $categories,
+            'classifications' => $classifications,
             'structures' => $structures,
             'states' => $states,
             'regions' => $regions,
+            'ratingScales' => $ratingScales
         ]);
     }
 }

@@ -8,9 +8,6 @@ use App\Http\Controllers\FormController;
 use App\Http\Controllers\ResultsController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\ProjectController;
-use App\Http\Controllers\ProjectControllerV2;
-use App\Http\Controllers\ResultsControllerV2;
-use App\Http\Controllers\ThreeDController;
 
 // Public routes
 Route::post('/register', [AuthController::class, 'register']);
@@ -40,16 +37,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/user/update-password', [UserController::class, 'updatePassword']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/form-inputs', [FormController::class, 'getFormInputs']);
-    Route::post('/results', [ResultsController::class, 'getResults']);
     Route::get('/projects/{projectId}', [ProjectController::class, 'showSelectedProject']);
-    Route::post('/submit-assessment', [ResultsController::class, 'submitAssessment']);
     Route::get('/users/{userId}/projects', [ProjectController::class, 'getUserProjects']);
     Route::get('/users/{userId}', [UserController::class, 'getUserById']);
     Route::get('/users/{userId}/preferences', [UserController::class, 'getPreferences']);
     Route::patch('/users/{userId}/preferences', [UserController::class, 'updatePreferences']);
-
-    // version 2
-    Route::post('/v2/results', [ResultsControllerV2::class, 'getResults']);
-    Route::get('/v2/projects/{projectId}', [ProjectControllerV2::class, 'showSelectedProject']);
-    Route::post('/v2/submit-assessment', [ResultsControllerV2::class, 'submitAssessment']);
+    Route::post('/results', [ResultsController::class, 'getResults']);
+    Route::get('/projects/{projectId}', [ProjectController::class, 'showSelectedProject']);
+    Route::post('/submit-assessment', [ResultsController::class, 'submitAssessment']);
+    Route::post('/projects/update-actual-cost', [ProjectController::class, 'updateActualCost']);
+    Route::get('/projects/{projectId}/certification-cost', [ProjectController::class, 'getProjectCertificationCost']);
+    Route::post('/projects/{projectId}/save-actual-changes', [ProjectController::class, 'saveProjectActualChanges']);
 });

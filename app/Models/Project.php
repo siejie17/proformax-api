@@ -10,10 +10,12 @@ class Project extends Model
         'user_id',
         'name',
         'building_type_id',
-        'category',
+        'classification_id',
+        'has_management',
+        'category_id',
         'size',
         'year',
-        'location',
+        'location_id',
         'structure_id',
         'cost_preview_way',
         'budget',
@@ -28,6 +30,16 @@ class Project extends Model
     public function buildingType()
     {
         return $this->belongsTo(BuildingType::class);
+    }
+
+    public function category()
+    {
+        return $this->belongsTo(Category::class);
+    }
+
+    public function classification()
+    {
+        return $this->belongsTo(BuildingClassification::class, 'classification_id');
     }
 
     public function structure()
@@ -48,5 +60,10 @@ class Project extends Model
     public function costs()
     {
         return $this->hasMany(Cost::class);
+    }
+
+    public function location()
+    {
+        return $this->belongsTo(Location::class, 'location_id');
     }
 }

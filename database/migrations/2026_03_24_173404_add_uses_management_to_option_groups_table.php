@@ -11,10 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('three_d_objects', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
-            $table->string('obj_name');
+        Schema::table('option_groups', function (Blueprint $table) {
+            $table->boolean('uses_management')->default(false)->after('label');
         });
     }
 
@@ -23,6 +21,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('three_d_objects');
+        Schema::table('option_groups', function (Blueprint $table) {
+            //
+        });
     }
 };

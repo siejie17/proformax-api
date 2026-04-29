@@ -4,27 +4,20 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class UserAnswer extends Model
+class ActualUserAnswer extends Model
 {
     protected $fillable = [
-        'user_id',
+        'project_id',
         'item_id',
-        'subitem_id',
-        'selection_id',
         'option_group_id',
         'option_id',
         'selection_group_id',
         'selection_id',
+        'subitem_id',
         'custom_answer',
-        'project_id',
     ];
-    
-    public $timestamps = false;
 
-    public function user()
-    {
-        return $this->belongsTo(User::class);
-    }
+    public $timestamps = false;
 
     public function item()
     {

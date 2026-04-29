@@ -25,4 +25,14 @@ class BuildingType extends Model
     {
         return $this->hasMany(Structure::class);
     }
+
+    public function certifications()
+    {
+        return $this->hasMany(Certification::class);
+    }
+
+    public function classifications()
+    {
+        return $this->hasMany(BuildingClassification::class);
+    }
 }

@@ -2,13 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Category;
 use App\Models\Cost;
+use App\Models\Location;
 use App\Models\Project;
 use App\Models\UserAnswer;
 use App\Services\CostCalculationService;
 use App\Services\FormDataMappingService;
 use App\Services\GreenElementsDataService;
-use App\Services\ThreeDObjectService;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -19,20 +20,32 @@ class ResultsController extends Controller
 {
     protected $costCalculation;
     protected $greenElementsData;
-    protected $threeDObject;
     private $mappingService;
 
-    public function __construct(CostCalculationService $costCalculation, GreenElementsDataService $greenElementsData, ThreeDObjectService $threeDObject, FormDataMappingService $mappingService)
+    public function __construct(
+            CostCalculationService $costCalculation, 
+            GreenElementsDataService $greenElementsData, 
+            FormDataMappingService $mappingService
+        )
     {
         $this->costCalculation = $costCalculation;
         $this->greenElementsData = $greenElementsData;
-        $this->threeDObject = $threeDObject;
         $this->mappingService = $mappingService;
     }
 
     public function getResults(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $formData = $request->input('formData');
+
+        if (!is_array($formData)) {
+            $formData = $request->all();
+        }
+
+        if (!is_array($formData)) {
+            $formData = [];
+        }
+    
+        $validator = Validator::make($formData, [
             'projectName' => 'required|string',
             'buildingType' => 'required|string',
             'category' => 'required|string',
@@ -52,8 +65,6 @@ class ResultsController extends Controller
             ]);
         }
 
-        $formData = $request->all();
-
         $mappingErrors = $this->mappingService->validateFormData($formData);
         if (!empty($mappingErrors)) {
             return response()->json([
@@ -63,20 +74,24 @@ class ResultsController extends Controller
             ]);
         }
 
+        $admin = $request->boolean('admin');
+
         try {
             $mappedData = $this->mappingService->mapFormData($formData);
-
-            $greenElements = $this->greenElementsData->getGreenElementsData($mappedData['buildingType']);
-
+            $greenElements = $this->greenElementsData->getGreenElementsData(
+                    $mappedData['buildingType'], 
+                    $mappedData['classificationId'] ?? null, 
+                    $mappedData['has_management'] ?? null, 
+                    $admin
+                );
             $cost = $this->costCalculation->calculateCost($mappedData);
-
-            $threeDObjects = $this->threeDObject->get3DVisibilityConfig();
+            $certifications = $this->mappingService->getCertifications($mappedData['buildingType']);
 
             return response()->json([
                 'cost' => $cost,
                 'green_elements' => $greenElements,
-                'three_d_objects' => $threeDObjects,
                 'mapped_form_data' => $mappedData,
+                'certifications' => $certifications
             ]);
         } catch (Exception $e) {
             return response()->json([
@@ -102,10 +117,12 @@ class ResultsController extends Controller
                         'user_id' => $userId,
                         'name' => $formData['projectName'],
                         'building_type_id' => $formData['buildingType'],
-                        'category' => $formData['category'],
+                        'classification_id' => $formData['classificationId'] ?? null,
+                        'has_management' => $formData['has_management'] ?? null,
+                        'category_id' => Category::where('category', $formData['category'])->first()?->id,
                         'size' => $formData['buildingSize'],
                         'year' => $formData['year'],
-                        'location' => config('formDataMappings.locations_reverse')[$formData['location']],
+                        'location_id' => Location::where('location_name', $formData['location_name'])->first()?->id,
                         'structure_id' => (int)$formData['structure'],
                         'cost_preview_way' => $formData['costPreviewWay'],
                         'budget' => $formData['projectBudget'] == null ? null : $formData['projectBudget'],
@@ -114,7 +131,7 @@ class ResultsController extends Controller
                         'target_certification' => $formData['certifiedRatingScale'],
                         'created_at' => now(),
                     ]);
-                    Log::info('Created project with ID: ' . $project->id);
+                    
                     return $project->id;
                 } catch (Exception $e) {
                     Log::error('Failed to create project: ' . $e->getMessage());
@@ -160,13 +177,24 @@ class ResultsController extends Controller
      */
     private function saveCostBreakdown($projectId, $costBreakdown)
     {
+        $hasCertificationAtLevelZero = false;
+        $lastTopLevelCode = null;
+
         foreach ($costBreakdown as $code => $data) {
+            $lastTopLevelCode = $code;
+            $description = $data['description'] ?? '';
+
+            if (strcasecmp(trim($description), 'Certification') === 0) {
+                $hasCertificationAtLevelZero = true;
+            }
+
             $parentCost = Cost::create([
                 'project_id' => $projectId,
                 'code' => $code,
-                'description' => $data['description'] ?? '',
+                'description' => $description,
                 'item_cost' => $data['cost'] ?? 0,
                 'level' => 0,
+                'is_certification' => $data['isMultiplier'] ?? false,
             ]);
 
             // Recursively save children up to max level 2
@@ -174,6 +202,28 @@ class ResultsController extends Controller
                 $this->saveCostChildren($projectId, $data['children'], $parentCost->id, 1);
             }
         }
+
+        if (!$hasCertificationAtLevelZero) {
+            Cost::create([
+                'project_id' => $projectId,
+                'code' => $this->getNextAlphabeticalCode($lastTopLevelCode),
+                'description' => 'Certification',
+                'item_cost' => 0,
+                'level' => 0,
+            ]);
+        }
+    }
+
+    private function getNextAlphabeticalCode($code)
+    {
+        if (empty($code)) {
+            return 'A';
+        }
+
+        $nextCode = strtoupper($code);
+        $nextCode++;
+
+        return $nextCode;
     }
 
     /**
@@ -193,6 +243,7 @@ class ResultsController extends Controller
                 'item_cost' => $data['cost'] ?? 0,
                 'parent_id' => $parentId,
                 'level' => $currentLevel,
+                'is_certification' => $data['isMultiplier'] ?? false,
             ]);
 
             // Continue recursion if children exist
@@ -218,6 +269,19 @@ class ResultsController extends Controller
             }
         }
 
+        if (isset($checkedItems['checkedOptions']) && is_array($checkedItems['checkedOptions'])) {
+            foreach ($checkedItems['checkedOptions'] as $optionGroupId => $options) {
+                foreach ($options as $optionId) {
+                    UserAnswer::create([
+                        'user_id' => $userId,
+                        'option_group_id' => $optionGroupId,
+                        'option_id' => $optionId,
+                        'project_id' => $projectId,
+                    ]);
+                }
+            }
+        }
+
         // Save checked subitems
         if (isset($checkedItems['checkedSubitems']) && is_array($checkedItems['checkedSubitems'])) {
             foreach ($checkedItems['checkedSubitems'] as $itemId => $subitems) {
@@ -240,6 +304,19 @@ class ResultsController extends Controller
                         'user_id' => $userId,
                         'item_id' => $itemId,
                         'custom_answer' => $custom['description'] ?? '',
+                        'project_id' => $projectId,
+                    ]);
+                }
+            }
+        }
+
+        if (!empty($checkedItems['selections']) && is_array($checkedItems['selections'])) {
+            foreach ($checkedItems['selections'] as $selectionGroupId => $selectedId) {
+                if ($selectedId) {
+                    UserAnswer::create([
+                        'user_id' => $userId,
+                        'selection_group_id' => $selectionGroupId,
+                        'selection_id' => $selectedId,
                         'project_id' => $projectId,
                     ]);
                 }

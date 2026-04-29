@@ -13,6 +13,7 @@ class Cost extends Model
         'item_cost',
         'parent_id',
         'level',
+        'is_certification',
     ];
     
     public $timestamps = false;
