@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ActualUserAnswer;
 use App\Models\Category;
 use App\Models\Cost;
 use App\Models\Location;
@@ -150,9 +151,9 @@ class ResultsController extends Controller
             });
 
             // Save checked items and subitems in its own transaction
-            DB::transaction(function () use ($projectId, $userId, $checkedItems) {
+            DB::transaction(function () use ($projectId, $checkedItems) {
                 try {
-                    $this->saveUserAnswers($projectId, $userId, $checkedItems);
+                    $this->saveUserAnswers($projectId, $checkedItems);
                 } catch (Exception $e) {
                     Log::error('Failed to save user answers: ' . $e->getMessage());
                     throw $e;
@@ -256,13 +257,12 @@ class ResultsController extends Controller
     /**
      * Save user answers for checked items and subitems
      */
-    private function saveUserAnswers($projectId, $userId, $checkedItems)
+    private function saveUserAnswers($projectId, $checkedItems)
     {
         // Save checked items
         if (isset($checkedItems['checkedItems']) && is_array($checkedItems['checkedItems'])) {
             foreach ($checkedItems['checkedItems'] as $itemId) {
                 UserAnswer::create([
-                    'user_id' => $userId,
                     'item_id' => $itemId,
                     'project_id' => $projectId,
                 ]);
@@ -273,7 +273,6 @@ class ResultsController extends Controller
             foreach ($checkedItems['checkedOptions'] as $optionGroupId => $options) {
                 foreach ($options as $optionId) {
                     UserAnswer::create([
-                        'user_id' => $userId,
                         'option_group_id' => $optionGroupId,
                         'option_id' => $optionId,
                         'project_id' => $projectId,
@@ -287,7 +286,6 @@ class ResultsController extends Controller
             foreach ($checkedItems['checkedSubitems'] as $itemId => $subitems) {
                 foreach ($subitems as $subitemId) {
                     UserAnswer::create([
-                        'user_id' => $userId,
                         'subitem_id' => $subitemId,
                         'item_id' => $itemId,
                         'project_id' => $projectId,
@@ -301,7 +299,6 @@ class ResultsController extends Controller
             foreach ($checkedItems['customItems'] as $itemId => $customItems) {
                 foreach ($customItems as $custom) {
                     UserAnswer::create([
-                        'user_id' => $userId,
                         'item_id' => $itemId,
                         'custom_answer' => $custom['description'] ?? '',
                         'project_id' => $projectId,
@@ -314,12 +311,20 @@ class ResultsController extends Controller
             foreach ($checkedItems['selections'] as $selectionGroupId => $selectedId) {
                 if ($selectedId) {
                     UserAnswer::create([
-                        'user_id' => $userId,
                         'selection_group_id' => $selectionGroupId,
                         'selection_id' => $selectedId,
                         'project_id' => $projectId,
                     ]);
                 }
+            }
+        }
+
+        if (!empty($checkedItems['compulsoryItems']) && is_array($checkedItems['compulsoryItems'])) {
+            foreach ($checkedItems['compulsoryItems'] as $itemId) {
+                ActualUserAnswer::create([
+                    'item_id' => $itemId,
+                    'project_id' => $projectId,
+                ]);
             }
         }
     }
