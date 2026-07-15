@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ProjectController;
 use App\Models\User;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Support\Facades\Route;
@@ -77,3 +78,17 @@ Route::get('/link-expired', function () {
     return view('link-expired');
 })->name('link.expired');
 
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [AuthController::class, 'login']);
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/logout', [AuthController::class, 'logout']);
+
+    Route::get('/me', function (Request $request) {
+        return response()->json($request->user());
+    });
+
+    Route::get('/users/{userId}/projects', [ProjectController::class, 'getUserProjects']);
+});

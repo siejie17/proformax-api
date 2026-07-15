@@ -13,7 +13,7 @@ class UserController extends Controller
 {
     public function getUserById($userId): JsonResponse
     {
-        $user = DB::table('users')->where('id', $userId)->first();
+        $user = User::find($userId);
 
         if (!$user) {
             return response()->json([
@@ -24,7 +24,7 @@ class UserController extends Controller
 
         return response()->json([
             'success' => true,
-            'user' => $user
+            'user' => $user,
         ]);
     }
     
@@ -37,20 +37,13 @@ class UserController extends Controller
         $base64String = $request->input('profile_pic');
         $user = $request->user(); // Get authenticated user
 
-        // Store Base64 string directly in LONG BLOB
-        DB::table('users')
-            ->where('id', $user->id)
-            ->update([
-                'profile_pic' => $base64String,
-                'updated_at' => now(),
-            ]);
-
-        // ✅ After updating, return the whole updated user record
-        $updatedUser = DB::table('users')->where('id', $user->id)->first();
+        $user->update([
+            'profile_pic' => $base64String,
+        ]);
 
         return response()->json([
             'message' => 'Photo updated successfully',
-            'user' => $updatedUser,
+            'user' => $user->fresh(),
         ]);
     }
 

@@ -39,6 +39,22 @@ class User extends Authenticatable implements MustVerifyEmail
     ];
 
     /**
+     * Return the profile picture as a UTF-8-safe string.
+     */
+    public function getProfilePicAttribute($value)
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (mb_check_encoding($value, 'UTF-8')) {
+            return $value;
+        }
+
+        return base64_encode($value);
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>

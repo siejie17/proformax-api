@@ -32,6 +32,16 @@ Route::get('/profile', function (Request $request) {
 
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
+    // Return the authenticated user (used by frontend at /api/me)
+    Route::get('/me', function (Request $request) {
+        return response()->json(
+            $request->user()->toArray(),
+            200,
+            [],
+            JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE
+        );
+    });
+
     Route::put('/user/update-profile-pic', [UserController::class, 'updateImage']);
     Route::patch('/user/profile', [UserController::class, 'updateProfile']);
     Route::put('/user/update-password', [UserController::class, 'updatePassword']);
