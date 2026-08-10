@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -26,6 +28,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'profile_pic',
         'email_notifications',
         'push_notifications',
+        'role_id',
     ];
 
     /**
@@ -66,6 +69,25 @@ class User extends Authenticatable implements MustVerifyEmail
             'password' => 'hashed',
             'email_notifications' => 'boolean',
             'push_notifications' => 'boolean',
+            'role_id' => 'integer',
         ];
+    }
+
+    /**
+     * The role assigned to this user.
+     */
+    public function role(): BelongsTo
+    {
+        return $this->belongsTo(Role::class);
+    }
+
+    public function projectMemberships(): HasMany
+    {
+        return $this->hasMany(ProjectMember::class);
+    }
+
+    public function projectMessages(): HasMany
+    {
+        return $this->hasMany(ProjectMessage::class);
     }
 }

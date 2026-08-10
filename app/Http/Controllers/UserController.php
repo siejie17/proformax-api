@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Resources\UserResource;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -27,7 +28,38 @@ class UserController extends Controller
             'user' => $user,
         ]);
     }
-    
+
+    public function search(Request $request)
+    {
+        $q = $request->string('q')->trim()->toString();
+
+        $exclude = collect($request->input('exclude_ids', []))
+            ->map(fn($v) => (int) $v)
+            ->all();
+
+        $users = User::query()
+            ->select('id', 'first_name', 'last_name', 'email', 'role_id', 'profile_pic')
+            ->where('id', '!=', $request->user()->id)
+            ->when($q !== '', function ($qb) use ($q) {
+                $qb->where(function ($w) use ($q) {
+                    $w->where('first_name', 'like', '%' . $q . '%')
+                        ->orWhere('last_name', 'like', '%' . $q . '%')
+                        ->orWhere('email', 'like', '%' . $q . '%')
+                        ->orWhereRaw(
+                            "CONCAT(first_name, ' ', last_name) LIKE ?",
+                            ['%' . $q . '%']
+                        );
+                });
+            })
+            ->when($exclude, fn($qb) => $qb->whereNotIn('id', $exclude))
+            ->limit(12)
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get();
+
+        return UserResource::collection($users);
+    }
+
     public function updateImage(Request $request)
     {
         $request->validate([
@@ -152,7 +184,6 @@ class UserController extends Controller
                     'push_notifications' => $user->push_notifications,
                 ]
             ], 200);
-
         } catch (\Exception $error) {
             return response()->json([
                 'message' => 'Error updating preferences',
@@ -161,7 +192,7 @@ class UserController extends Controller
             ], 500);
         }
     }
-    
+
     /**
      * Fetch user preferences
      * GET /users/{userId}/preferences
@@ -178,7 +209,6 @@ class UserController extends Controller
                     'push_notifications' => $user->push_notifications ?? false,
                 ]
             ], 200);
-
         } catch (\Exception $error) {
             return response()->json([
                 'message' => 'Error fetching preferences',

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ActualUserAnswer;
 use App\Models\Cost;
 use App\Models\Project;
+use App\Models\ProjectMember;
 use App\Models\UserAnswer;
 use App\Models\Location;
 use App\Services\GreenElementsDataService;
@@ -35,7 +36,7 @@ class ProjectController extends Controller
             $projects = Project::where('user_id', $userId)
                 ->where('cost_preview_way', 'Detailed')
                 ->with([
-                    'buildingType:id,code',
+                    'buildingType:id,code,name',
                     'structure:id,name',
                     'classification:id,name',
                     'location:id,location_name',
@@ -47,6 +48,7 @@ class ProjectController extends Controller
                         'id' => $project->id,
                         'name' => $project->name,
                         'building_type' => $project->buildingType?->code,
+                        'type_name' => $project->buildingType?->name,
                         'classification' => $project->classification?->name,
                         'structure' => $project->structure?->name,
                         'category' => $project->category?->category,
@@ -63,12 +65,46 @@ class ProjectController extends Controller
                     ];
                 });
 
-            if ($projects->isEmpty()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No projects found for this user.'
-                ], 404);
-            }
+            return response()->json([
+                'success' => true,
+                'projectsData' => $projects,
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving projects: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Retrieve all projects to which the given user has added members via the
+     * project chat's "add members" functionality.
+     *
+     * These projects are identified by the `added_by` column on the
+     * `project_members` table, which records the user who added each member
+     * through the chat. This is different from the projects the user created
+     * (found via `projects.user_id`) — here we return the projects where the
+     * user has actively added other people to the project chat.
+     */
+    public function getUserAddedMemberProjects($userId)
+    {
+        try {
+            $projectIds = ProjectMember::where('added_by', $userId)
+                ->distinct()
+                ->pluck('project_id');
+
+            $projects = $this->formatProjectsList(
+                Project::whereIn('id', $projectIds)
+                    ->with([
+                        'buildingType:id,code,name',
+                        'structure:id,name',
+                        'classification:id,name',
+                        'location:id,location_name',
+                    ])
+                    ->latest()
+                    ->get()
+            );
 
             return response()->json([
                 'success' => true,
@@ -80,6 +116,75 @@ class ProjectController extends Controller
                 'message' => 'Error retrieving projects: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Retrieve all projects that the given user was added to as a member via
+     * the project chat's "add members" functionality.
+     *
+     * These are projects the user did NOT create (excluded via
+     * `projects.user_id != userId`) but where a record exists in
+     * `project_members` with `user_id = userId` (i.e. an owner or another
+     * member added them through the chat).
+     */
+    public function getUserAddedProjects($userId)
+    {
+        try {
+            $projects = $this->formatProjectsList(
+                Project::whereHas('members', function ($query) use ($userId) {
+                    $query->where('user_id', $userId);
+                })
+                ->where('user_id', '!=', $userId)
+                ->with([
+                    'buildingType:id,code,name',
+                    'structure:id,name',
+                    'classification:id,name',
+                    'location:id,location_name',
+                ])
+                ->latest()
+                ->get()
+            );
+
+            return response()->json([
+                'success' => true,
+                'projectsData' => $projects,
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving projects: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Format a collection of projects into the standard project-list shape
+     * (same fields as getUserProjects) so the frontend can consume both
+     * "created" and "added" project lists identically.
+     */
+    private function formatProjectsList($projects)
+    {
+        return $projects->map(function ($project) {
+            return [
+                'id' => $project->id,
+                'name' => $project->name,
+                'building_type' => $project->buildingType?->code,
+                'type_name' => $project->buildingType?->name,
+                'classification' => $project->classification?->name,
+                'structure' => $project->structure?->name,
+                'category' => $project->category?->category,
+                'size' => $project->size,
+                'year' => $project->year,
+                'location' => $project->location?->location_name,
+                'budget' => $project->budget,
+                'adjusted_cost' => $project->adjusted_cost,
+                'rating' => $project->rating,
+                'target_certification' => $project->target_certification,
+                'created_at' => $project->created_at,
+                'certifications' => $this->formDataMappingService
+                    ->getCertifications($project->building_type_id),
+            ];
+        });
     }
 
     /**
@@ -365,16 +470,31 @@ class ProjectController extends Controller
     public function updateActualCost(Request $request)
     {
         $request->validate([
-            'changedNodes' => 'required|array'
+            'changedNodes'   => 'array',
+            'newNodes'       => 'array',
+            'deletedNodeIds' => 'array',
         ]);
 
         try {
-            $changedNodes = $request->input('changedNodes');
+            // 1. Update existing
+            foreach ($request->input('changedNodes', []) as $id => $actualCost) {
+                Cost::where('id', $id)->update(['actual_cost' => $actualCost]);
+            }
 
-            foreach ($changedNodes as $id => $actualCost) {
-                Cost::where('id', $id)->update([
-                    'actual_cost' => $actualCost
+            // 2. Create new
+            foreach ($request->input('newNodes', []) as $node) {
+                Cost::create([
+                    'parent_id'   => $node['parentId'],
+                    'description' => $node['description'],
+                    'cost'        => $node['cost'] ?? 0,
+                    'actual_cost' => $node['actualCost'],
                 ]);
+            }
+
+            // 3. Delete removed
+            $deleted = $request->input('deletedNodeIds', []);
+            if (!empty($deleted)) {
+                Cost::whereIn('id', $deleted)->delete();
             }
 
             return response()->json([

@@ -2,10 +2,19 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\ResultsController;
+use App\Http\Controllers\UserController;
 use App\Models\User;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Http\Request;
+
+use App\Http\Controllers\Api\MessageReactionController;
+use App\Http\Controllers\Api\ProjectAttachmentController;
+use App\Http\Controllers\Api\ProjectMemberController;
+use App\Http\Controllers\Api\ProjectMessageController as ApiProjectMessageController;   
+
+use App\Http\Controllers\FormController;
 
 Route::get('/', function () {
     return view('welcome');
@@ -84,11 +93,47 @@ Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
 Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/logout', [AuthController::class, 'logout']);
-
+    // Return the authenticated user (used by frontend at /api/me)
     Route::get('/me', function (Request $request) {
-        return response()->json($request->user());
+        return response()->json(
+            $request->user()->toArray(),
+            200,
+            [],
+            JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE
+        );
+    });
+    // Search users to invite to a project (realtime picker).
+    Route::get('/users', [UserController::class, 'search']);
+
+     Route::middleware('project.member')->group(function () {
+        Route::prefix('projects/{project}')->group(function () {
+            Route::get('messages', [ApiProjectMessageController::class, 'index']);
+            Route::post('messages', [ApiProjectMessageController::class, 'store']);
+            Route::post('attachments', [ProjectAttachmentController::class, 'store']);
+            Route::get('members', [ProjectMemberController::class, 'index']);
+            Route::post('members', [ProjectMemberController::class, 'store']);
+
+            // owner-only
+        });
+        Route::post('messages/{message}/reactions', [MessageReactionController::class, 'toggle'])->middleware('project.member');
+        Route::delete('members/{userId}', [ProjectMemberController::class, 'destroy']);
     });
 
+    Route::put('/user/update-profile-pic', [UserController::class, 'updateImage']);
+    Route::patch('/user/profile', [UserController::class, 'updateProfile']);
+    Route::put('/user/update-password', [UserController::class, 'updatePassword']);
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/form-inputs', [FormController::class, 'getFormInputs']);
+    Route::get('/projects/{projectId}', [ProjectController::class, 'showSelectedProject']);
     Route::get('/users/{userId}/projects', [ProjectController::class, 'getUserProjects']);
+    Route::get('/users/{userId}', [UserController::class, 'getUserById']);
+    Route::get('/users/{userId}/preferences', [UserController::class, 'getPreferences']);
+    Route::patch('/users/{userId}/preferences', [UserController::class, 'updatePreferences']);
+    Route::post('/results', [ResultsController::class, 'getResults']);
+    Route::get('/projects/{projectId}', [ProjectController::class, 'showSelectedProject']);
+    Route::post('/submit-assessment', [ResultsController::class, 'submitAssessment']);
+    Route::post('/projects/update-actual-cost', [ProjectController::class, 'updateActualCost']);
+    Route::get('/projects/{projectId}/certification-cost', [ProjectController::class, 'getProjectCertificationCost']);
+    Route::post('/projects/{projectId}/save-actual-changes', [ProjectController::class, 'saveProjectActualChanges']);
+    Route::post('/assessment/prediction-cost', [ResultsController:: class, 'getRealTimePrediction']);
 });

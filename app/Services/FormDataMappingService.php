@@ -29,7 +29,7 @@ class FormDataMappingService
         $mapped['location_name'] = $this->formatLocationName($formData['state'], $formData['region'] ?? null);
 
         // Map structure
-        $mapped['structure'] = $this->mapStructure($formData['structure']);
+        $mapped['structure'] = $this->mapStructure($formData['structure'], $mapped['buildingType']);
 
         // Map rating scale
         $mapped['certifiedRatingScale'] = $this->mapRatingScale($formData['certifiedRatingScale'], $mapped['buildingType']);
@@ -43,6 +43,19 @@ class FormDataMappingService
         $mapped['costPreviewWay'] = $formData['costPreviewWay'];
 
         return $mapped;
+    }
+
+    public function mapPredictionData(array $predictionData): array
+    {
+        $data = [];
+
+        $data['category'] = $predictionData['category'];
+        $data['year'] = $predictionData['year'];
+        $data['buildingSize'] = $predictionData['size'];
+        $data['structure'] = $this->mapStructure($predictionData['structure'], BuildingType::where('name', $predictionData['type'])->value('id'));
+        $data['location'] = $this->mapLocation($predictionData['state'], $predictionData['region'] ?? null);
+
+        return $data;
     }
 
     /**
@@ -100,12 +113,16 @@ class FormDataMappingService
     /**
      * Map structure name to code
      */
-    private function mapStructure(string $structure): string
+    private function mapStructure(string $structure, string $buildingTypeId): string
     {
-        $matchedStructure = Structure::where('name', $structure)->first();
+        $matchedStructure = Structure::where('name', $structure)
+            ->where('building_type_id', $buildingTypeId)
+            ->first();
 
         if (!$matchedStructure) {
-            throw new Exception("Invalid structure: {$structure}");
+            throw new Exception(
+                "Invalid structure '{$structure}' for building type ID {$buildingTypeId}."
+            );
         }
 
         return $matchedStructure->id;

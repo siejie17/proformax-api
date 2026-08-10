@@ -10,17 +10,16 @@ use Illuminate\Support\Facades\DB;
 
 class CostCalculationService
 {
-    public function calculateCost($mappedData)
+    public function calculateCost(array $data)
     {
         // Extract form data
-        $category = $mappedData['category'];
-        $year = $mappedData['year'];
-        $buildingSize = $mappedData['buildingSize'];
-        $structure = $mappedData['structure'];
-        $location = $mappedData['location'];
-        $certifiedRatingScale = $mappedData['certifiedRatingScale'];
+        $category = $data['category'];
+        $year = $data['year'];
+        $buildingSize = $data['buildingSize'];
+        $structure = $data['structure'];
+        $location = $data['location'];
 
-        return $this->getConstructionCost($category, $buildingSize, $year, $location, $structure, $certifiedRatingScale);
+        return $this->getConstructionCost($category, $buildingSize, $year, $location, $structure);
     }
 
     public function getConstructionCost(string $category, float $buildingSize, int $year, string $location, string $structure)

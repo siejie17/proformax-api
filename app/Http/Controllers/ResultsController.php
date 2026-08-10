@@ -7,6 +7,8 @@ use App\Models\Category;
 use App\Models\Cost;
 use App\Models\Location;
 use App\Models\Project;
+use App\Models\ProjectMember;
+use App\Models\Role;
 use App\Models\UserAnswer;
 use App\Services\CostCalculationService;
 use App\Services\FormDataMappingService;
@@ -24,11 +26,10 @@ class ResultsController extends Controller
     private $mappingService;
 
     public function __construct(
-            CostCalculationService $costCalculation, 
-            GreenElementsDataService $greenElementsData, 
-            FormDataMappingService $mappingService
-        )
-    {
+        CostCalculationService $costCalculation,
+        GreenElementsDataService $greenElementsData,
+        FormDataMappingService $mappingService
+    ) {
         $this->costCalculation = $costCalculation;
         $this->greenElementsData = $greenElementsData;
         $this->mappingService = $mappingService;
@@ -45,7 +46,7 @@ class ResultsController extends Controller
         if (!is_array($formData)) {
             $formData = [];
         }
-    
+
         $validator = Validator::make($formData, [
             'projectName' => 'required|string',
             'buildingType' => 'required|string',
@@ -80,11 +81,11 @@ class ResultsController extends Controller
         try {
             $mappedData = $this->mappingService->mapFormData($formData);
             $greenElements = $this->greenElementsData->getGreenElementsData(
-                    $mappedData['buildingType'], 
-                    $mappedData['classificationId'] ?? null, 
-                    $mappedData['has_management'] ?? null, 
-                    $admin
-                );
+                $mappedData['buildingType'],
+                $mappedData['classificationId'] ?? null,
+                $mappedData['has_management'] ?? null,
+                $admin
+            );
             $cost = $this->costCalculation->calculateCost($mappedData);
             $certifications = $this->mappingService->getCertifications($mappedData['buildingType']);
 
@@ -92,13 +93,86 @@ class ResultsController extends Controller
                 'cost' => $cost,
                 'green_elements' => $greenElements,
                 'mapped_form_data' => $mappedData,
-                'certifications' => $certifications
+                'certifications' => $certifications,
+                'original_form_data' => $formData
             ]);
         } catch (Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage()
             ]);
+        }
+    }
+
+    public function getRealTimePrediction(Request $request)
+    {
+        $predictionData = $request->input('predictionData');
+
+        if (!is_array($predictionData)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'predictionData must be an object.'
+            ], 400);
+        }
+
+        $validator = Validator::make($predictionData, [
+            'type' => 'required|string',
+            'category' => 'required|string',
+            'year' => 'required|integer',
+            'size' => 'required|numeric',
+            'state' => 'required|string',
+            'region' => 'nullable|string',
+            'structure' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed.',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            // Map frontend data to calculation format
+            $data = $this->mappingService->mapPredictionData($predictionData);
+
+            // Ensure mapping returned the required fields
+            $requiredFields = [
+                'category',
+                'year',
+                'buildingSize',
+                'location',
+                'structure'
+            ];
+
+            foreach ($requiredFields as $field) {
+                if (!array_key_exists($field, $data)) {
+                    throw new Exception("Mapped data is missing required field '{$field}'.");
+                }
+            }
+
+            // Calculate cost
+            $cost = $this->costCalculation->calculateCost($data);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'totalCost' => $cost['total_cost'],
+                ]
+            ], 200);
+        } catch (\Throwable $e) {
+            Log::error('Real-time prediction failed.', [
+                'request' => $predictionData,
+                'mappedData' => $data ?? null,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 500);
         }
     }
 
@@ -132,7 +206,7 @@ class ResultsController extends Controller
                         'target_certification' => $formData['certifiedRatingScale'],
                         'created_at' => now(),
                     ]);
-                    
+
                     return $project->id;
                 } catch (Exception $e) {
                     Log::error('Failed to create project: ' . $e->getMessage());
@@ -160,6 +234,24 @@ class ResultsController extends Controller
                 }
             });
 
+            // Add the current user to the project chat as the first member
+            DB::transaction(function () use ($projectId, $userId) {
+                try {
+                    $ownerRoleId = Role::where('name', 'gbi_facilitator')->value('id');
+
+                    ProjectMember::firstOrCreate([
+                        'project_id' => $projectId,
+                        'user_id'    => $userId,
+                    ], [
+                        'added_by' => $userId,
+                        'role_id'  => $ownerRoleId,
+                    ]);
+                } catch (Exception $e) {
+                    Log::error('Failed to add project owner as chat member: ' . $e->getMessage());
+                    throw $e;
+                }
+            });
+
             return response()->json([
                 'success' => true,
                 'message' => 'Assessment submitted successfully.',
@@ -176,7 +268,7 @@ class ResultsController extends Controller
     /**
      * Save cost breakdown hierarchically (supports up to level 2)
      */
-    private function saveCostBreakdown($projectId, $costBreakdown)
+    private function saveCostBreakdown($projectId, array $costBreakdown)
     {
         $hasCertificationAtLevelZero = false;
         $lastTopLevelCode = null;
@@ -215,7 +307,7 @@ class ResultsController extends Controller
         }
     }
 
-    private function getNextAlphabeticalCode($code)
+    private function getNextAlphabeticalCode(string $code)
     {
         if (empty($code)) {
             return 'A';
@@ -230,7 +322,7 @@ class ResultsController extends Controller
     /**
      * Recursively save cost children (max level = 2)
      */
-    private function saveCostChildren($projectId, $children, $parentId, $currentLevel)
+    private function saveCostChildren(int $projectId, array $children, int $parentId, int $currentLevel)
     {
         if ($currentLevel > 2) {
             return; // Stop recursion at max level 2
@@ -257,7 +349,7 @@ class ResultsController extends Controller
     /**
      * Save user answers for checked items and subitems
      */
-    private function saveUserAnswers($projectId, $checkedItems)
+    private function saveUserAnswers(int $projectId, $checkedItems)
     {
         // Save checked items
         if (isset($checkedItems['checkedItems']) && is_array($checkedItems['checkedItems'])) {
@@ -325,6 +417,59 @@ class ResultsController extends Controller
                     'item_id' => $itemId,
                     'project_id' => $projectId,
                 ]);
+            }
+        }
+
+        if (!empty($checkedItems['compulsory_items']) && is_array($checkedItems['compulsory_items'])) {
+            $comp = $checkedItems['compulsory_items'];
+
+            // Items
+            if (!empty($comp['items'])) {
+                foreach ($comp['items'] as $itemId) {
+                    ActualUserAnswer::create([
+                        'item_id' => $itemId,
+                        'project_id' => $projectId,
+                    ]);
+                }
+            }
+
+            // Subitems (keyed by parent item ID)
+            if (!empty($comp['subitems'])) {
+                foreach ($comp['subitems'] as $itemId => $subitemIds) {
+                    foreach ($subitemIds as $subitemId) {
+                        ActualUserAnswer::create([
+                            'subitem_id' => $subitemId,
+                            'item_id' => $itemId,
+                            'project_id' => $projectId,
+                        ]);
+                    }
+                }
+            }
+
+            // Options (keyed by optionGroupId)
+            if (!empty($comp['options'])) {
+                foreach ($comp['options'] as $optionGroupId => $optionIds) {
+                    foreach ($optionIds as $optionId) {
+                        ActualUserAnswer::create([
+                            'option_group_id' => $optionGroupId,
+                            'option_id' => $optionId,
+                            'project_id' => $projectId,
+                        ]);
+                    }
+                }
+            }
+
+            // Selections (keyed by selectionGroupId)
+            if (!empty($comp['selections'])) {
+                foreach ($comp['selections'] as $selectionGroupId => $selectionIds) {
+                    foreach ($selectionIds as $selectionId) {
+                        ActualUserAnswer::create([
+                            'selection_group_id' => $selectionGroupId,
+                            'selection_id' => $selectionId,
+                            'project_id' => $projectId,
+                        ]);
+                    }
+                }
             }
         }
     }
