@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Resources\UserResource;
+use App\Models\Role;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,6 +13,45 @@ use Illuminate\Support\Facades\Validator;
 
 class UserController extends Controller
 {
+    public function roles(Request $request): JsonResponse
+    {
+        $roles = Role::query()
+                    ->whereRaw('LOWER(display_name) != ?', ['member'])
+                    ->orderBy('id')
+                    ->get();
+
+        return response()->json([
+            'success' => true,
+            'roles' => $roles,
+        ]);
+    }
+
+    public function updateRole(Request $request, ?int $userId = null): JsonResponse
+    {
+        $request->validate([
+            'role_id' => ['required', 'integer', 'exists:roles,id'],
+        ]);
+
+        $targetUser = User::query()->with('role')->find($userId);
+
+        if (! $targetUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found.',
+            ], 404);
+        }
+
+        $targetUser->update([
+            'role_id' => (int) $request->input('role_id'),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Role updated successfully.',
+            'user' => $targetUser->fresh('role'),
+        ]);
+    }
+
     public function getUserById($userId): JsonResponse
     {
         $user = User::find($userId);

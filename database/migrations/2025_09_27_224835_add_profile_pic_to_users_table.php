@@ -18,7 +18,9 @@ return new class extends Migration
         });
 
         // then alter it to LONGBLOB
-        DB::statement('ALTER TABLE users MODIFY profile_pic LONGBLOB NULL');
+        if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+            DB::statement('ALTER TABLE users MODIFY profile_pic LONGBLOB NULL');
+        }
     }
 
     /**

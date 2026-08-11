@@ -20,6 +20,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        DB::statement("SET time_zone='+08:00'");
+        $driver = DB::getDriverName();
+
+        if (in_array($driver, ['mysql', 'mariadb'], true)) {
+            DB::statement("SET time_zone='+08:00'");
+        }
     }
 }

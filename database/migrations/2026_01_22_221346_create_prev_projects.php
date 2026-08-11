@@ -13,15 +13,25 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::create('prev_projects', function (Blueprint $table) {
-            $table->id();
-            $table->unsignedBigInteger('category_id');
-            $table->integer('year');
-            $table->unsignedBigInteger('location_id');
-            $table->timestamps();
+        if (! Schema::hasTable('prev_projects')) {
+            Schema::create('prev_projects', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('category_id');
+                $table->integer('year');
+                $table->unsignedBigInteger('location_id');
+                $table->timestamps();
 
-            $table->foreign('category_id')->references('id')->on('categories')->onDelete('cascade');
-            $table->foreign('location_id')->references('id')->on('locations')->onDelete('cascade');
+                $table->foreign('category_id')->references('id')->on('categories')->onDelete('cascade');
+                $table->foreign('location_id')->references('id')->on('locations')->onDelete('cascade');
+            });
+
+            return;
+        }
+
+        Schema::table('prev_projects', function (Blueprint $table) {
+            if (! Schema::hasColumn('prev_projects', 'location_id')) {
+                $table->unsignedBigInteger('location_id')->nullable();
+            }
         });
     }
 
@@ -32,6 +42,14 @@ return new class extends Migration
      */
     public function down()
     {
-        Schema::dropIfExists('prev_projects');
+        if (! Schema::hasTable('prev_projects')) {
+            return;
+        }
+
+        Schema::table('prev_projects', function (Blueprint $table) {
+            if (Schema::hasColumn('prev_projects', 'location_id')) {
+                $table->dropColumn('location_id');
+            }
+        });
     }
 };

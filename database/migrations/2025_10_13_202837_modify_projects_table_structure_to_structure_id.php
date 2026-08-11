@@ -12,10 +12,15 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('projects', function (Blueprint $table) {
-            // Drop the old structure column
-            $table->dropColumn('structure');
-            // Add the new structure_id foreign key column
-            $table->foreignId('structure_id')->constrained('structures')->cascadeOnDelete();
+            // Drop the old structure column only if it still exists in older databases.
+            if (Schema::hasColumn('projects', 'structure')) {
+                $table->dropColumn('structure');
+            }
+
+            // Add the new structure_id foreign key column only when it is missing.
+            if (! Schema::hasColumn('projects', 'structure_id')) {
+                $table->foreignId('structure_id')->constrained('structures')->cascadeOnDelete();
+            }
         });
     }
 
@@ -25,11 +30,16 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('projects', function (Blueprint $table) {
-            // Drop the foreign key and structure_id column
-            $table->dropForeign(['structure_id']);
-            $table->dropColumn('structure_id');
-            // Re-add the original structure column
-            $table->string('structure');
+            // Drop the foreign key and structure_id column only if they exist.
+            if (Schema::hasColumn('projects', 'structure_id')) {
+                $table->dropForeign(['structure_id']);
+                $table->dropColumn('structure_id');
+            }
+
+            // Re-add the original structure column only when it is missing.
+            if (! Schema::hasColumn('projects', 'structure')) {
+                $table->string('structure');
+            }
         });
     }
 };

@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Middleware\EnsureProjectEditor;
 use App\Http\Middleware\EnsureProjectMember;
 use App\Http\Middleware\EnsureProjectViewer;
 use App\Http\Middleware\IsProjectOwner;
@@ -23,7 +22,6 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'project.member' => EnsureProjectMember::class,
             'project.viewer' => EnsureProjectViewer::class,
-            'project.editor' => EnsureProjectEditor::class,
             'project.owner'  => IsProjectOwner::class,
         ]);
     })
