@@ -286,6 +286,7 @@ class ResultsController extends Controller
                 'code' => $code,
                 'description' => $description,
                 'item_cost' => $data['cost'] ?? 0,
+                'actual_cost' => $data['cost'] ?? 0,
                 'level' => 0,
                 'is_certification' => $data['isMultiplier'] ?? false,
             ]);
@@ -334,6 +335,7 @@ class ResultsController extends Controller
                 'code' => $code,
                 'description' => $data['description'] ?? '',
                 'item_cost' => $data['cost'] ?? 0,
+                'actual_cost' => $data['cost'] ?? 0,
                 'parent_id' => $parentId,
                 'level' => $currentLevel,
                 'is_certification' => $data['isMultiplier'] ?? false,
@@ -411,8 +413,9 @@ class ResultsController extends Controller
             }
         }
 
-        if (!empty($checkedItems['compulsoryItems']) && is_array($checkedItems['compulsoryItems'])) {
-            foreach ($checkedItems['compulsoryItems'] as $itemId) {
+        $compulsory = $checkedItems['compulsory_items']['items'] ?? [];
+        if (!empty($compulsory) && is_array($compulsory)) {
+            foreach ($compulsory as $itemId) {
                 ActualUserAnswer::create([
                     'item_id' => $itemId,
                     'project_id' => $projectId,

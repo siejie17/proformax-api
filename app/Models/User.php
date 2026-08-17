@@ -81,6 +81,12 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->belongsTo(Role::class);
     }
 
+    public function getEffectiveRoleLabelAttribute(): ?string
+    {
+        return $this->custom_role ?: $this->role?->name;
+    }
+
+
     public function projectMemberships(): HasMany
     {
         return $this->hasMany(ProjectMember::class);

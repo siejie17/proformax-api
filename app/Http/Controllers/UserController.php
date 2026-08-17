@@ -16,9 +16,9 @@ class UserController extends Controller
     public function roles(Request $request): JsonResponse
     {
         $roles = Role::query()
-                    ->whereRaw('LOWER(display_name) != ?', ['member'])
-                    ->orderBy('id')
-                    ->get();
+            ->whereRaw('LOWER(display_name) != ?', ['member'])
+            ->orderBy('id')
+            ->get();
 
         return response()->json([
             'success' => true,
@@ -29,7 +29,8 @@ class UserController extends Controller
     public function updateRole(Request $request, ?int $userId = null): JsonResponse
     {
         $request->validate([
-            'role_id' => ['required', 'integer', 'exists:roles,id'],
+            'role_id' => ['nullable', 'integer', 'exists:roles,id'],
+            'custom_role' => ['nullable', 'string', 'max:100'],
         ]);
 
         $targetUser = User::query()->with('role')->find($userId);
@@ -41,9 +42,23 @@ class UserController extends Controller
             ], 404);
         }
 
-        $targetUser->update([
-            'role_id' => (int) $request->input('role_id'),
-        ]);
+        $customRole = $request->input('custom_role');
+        $roleId = $request->input('role_id');
+
+        if ($customRole !== null && trim($customRole) !== '') {
+            $targetUser->role_id = null;
+            $targetUser->custom_role = ucwords(mb_strtolower(trim($customRole)));
+            $targetUser->save();
+        } elseif ($roleId !== null) {
+            $targetUser->role_id = (int) $roleId;
+            $targetUser->custom_role = null;
+            $targetUser->save();
+        } else {
+            return response()->json([
+                'success' => false,
+                'message' => 'Provide either a role or a custom role.',
+            ], 422);
+        }
 
         return response()->json([
             'success' => true,

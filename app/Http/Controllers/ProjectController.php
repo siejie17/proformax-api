@@ -134,15 +134,15 @@ class ProjectController extends Controller
                 Project::whereHas('members', function ($query) use ($userId) {
                     $query->where('user_id', $userId);
                 })
-                ->where('user_id', '!=', $userId)
-                ->with([
-                    'buildingType:id,code,name',
-                    'structure:id,name',
-                    'classification:id,name',
-                    'location:id,location_name',
-                ])
-                ->latest()
-                ->get()
+                    ->where('user_id', '!=', $userId)
+                    ->with([
+                        'buildingType:id,code,name',
+                        'structure:id,name',
+                        'classification:id,name',
+                        'location:id,location_name',
+                    ])
+                    ->latest()
+                    ->get()
             );
 
             return response()->json([
@@ -392,7 +392,7 @@ class ProjectController extends Controller
             $costData = [
                 'id' => $parentCost->id,
                 'description' => $parentCost->description,
-                'cost' => 0.0
+                'cost' => 0.0,
             ];
 
             // Recursively get children and their costs
@@ -405,6 +405,8 @@ class ProjectController extends Controller
                 // If no children, add cost directly
                 $costData['cost'] = (float) $parentCost->item_cost;
                 $costData['actual_cost'] = (float) $parentCost->actual_cost;
+                $costData['actual_pct'] = (float) $parentCost->actual_pct;
+                $costData['actual_direction'] = $parentCost->actual_direction ?? 'up';
             }
 
             $costData['is_certification'] = $parentCost->is_certification;
@@ -437,18 +439,22 @@ class ProjectController extends Controller
                 'id' => $child->id,
                 'description' => $child->description,
                 'cost' => 0.0,
+                'actual_cost' => 0.0,
+                'actual_pct' => 0.0,
+                'actual_direction' => 'up',
             ];
 
-            // Check if this child has its own children
             $nestedChildren = $this->getNestedChildren($costs, $child->id);
+
             if ($nestedChildren) {
-                // Node has children: cost is sum of children only
                 $data['children'] = $nestedChildren['children'];
                 $data['cost'] = $nestedChildren['totalCost'];
             } else {
-                // Leaf node: use its actual item_cost
+                // Leaf node
                 $data['cost'] = (float) $child->item_cost;
                 $data['actual_cost'] = (float) $child->actual_cost;
+                $data['actual_pct'] = (float) $child->actual_pct;
+                $data['actual_direction'] = $child->actual_direction ?? 'up';
             }
 
             $data['is_certification'] = $child->is_certification;
@@ -472,16 +478,44 @@ class ProjectController extends Controller
         $request->validate([
             'changedNodes'   => 'array',
             'newNodes'       => 'array',
-            'deletedNodeIds' => 'array',
+            'changedPct'     => 'array',
         ]);
 
         try {
-            // 1. Update existing
-            foreach ($request->input('changedNodes', []) as $id => $actualCost) {
-                Cost::where('id', $id)->update(['actual_cost' => $actualCost]);
+            // Update percentage + direction
+            foreach ($request->input('changedPct', []) as $id => $cfg) {
+                $cost = Cost::find($id);
+
+                if ($cost) {
+                    $cost->actual_pct = (float) ($cfg['pct'] ?? 0);
+                    $cost->actual_direction =
+                        ($cfg['direction'] ?? 'up') === 'down' ? 'down' : 'up';
+
+                    // Calculate actual_cost only if actual_cost wasn't manually changed
+                    if (!array_key_exists($id, $request->input('changedNodes', []))) {
+                        $cost->actual_cost = round(
+                            $cost->cost *
+                                (
+                                    1 +
+                                    ($cost->actual_direction === 'down' ? -1 : 1)
+                                    * $cost->actual_pct / 100
+                                ),
+                            2
+                        );
+                    }
+
+                    $cost->save();
+                }
             }
 
-            // 2. Create new
+            // Update manually changed actual_cost
+            foreach ($request->input('changedNodes', []) as $id => $actualCost) {
+                Cost::where('id', $id)->update([
+                    'actual_cost' => $actualCost
+                ]);
+            }
+
+            // Create new
             foreach ($request->input('newNodes', []) as $node) {
                 Cost::create([
                     'parent_id'   => $node['parentId'],
@@ -489,12 +523,6 @@ class ProjectController extends Controller
                     'cost'        => $node['cost'] ?? 0,
                     'actual_cost' => $node['actualCost'],
                 ]);
-            }
-
-            // 3. Delete removed
-            $deleted = $request->input('deletedNodeIds', []);
-            if (!empty($deleted)) {
-                Cost::whereIn('id', $deleted)->delete();
             }
 
             return response()->json([

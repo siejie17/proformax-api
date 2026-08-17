@@ -14,18 +14,19 @@ class MemberResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        // \Log::info('MemberResource toArray called', ['resource' => $this->resource]);
+        $role = $this->role ?: $this->custom_role ?: $this->user?->effective_role_label;         // from the users table
+
         return [
             'membership' => [
-                'id'       => (string) $this->id,
+                'id'        => (string) $this->id,
                 'projectId' => $this->project_id,
-                'userId'   => (string) $this->user_id,
-                'role'     => $this->role ? $this->role : null,
-                'roleId'   => $this->role_id,
+                'userId'    => (string) $this->user_id,
+                'role'      => $role,
+                'roleId'    => $this->role ? $this->role_id : null,
             ],
-            'user'       => $this->user ? new UserResource($this->user) : ['id' => (string) $this->user_id],
-            'isOwner'    => $this->project?->user_id === $this->user_id,
-            'role'       => $this->role ? $this->role : null,
+            'user'    => $this->user ? new UserResource($this->user) : ['id' => (string) $this->user_id],
+            'isOwner' => $this->project?->user_id === $this->user_id,
+            'role'    => $role,
         ];
     }
 }
