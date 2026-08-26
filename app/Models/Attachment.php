@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Attachment extends Model
 {
-    protected $fillable = ['project_id', 'user_id', 'original_name', 'filename', 'path', 'mime_type', 'kind', 'size', 'uploaded_at'];
+    protected $fillable = ['project_id', 'user_id', 'assessment_item_id', 'original_name', 'filename', 'path', 'mime_type', 'kind', 'size', 'uploaded_at'];
 
     protected $casts = ['size' => 'integer', 'uploaded_at' => 'datetime'];
 
@@ -18,4 +18,5 @@ class Attachment extends Model
 
     public function project(): BelongsTo { return $this->belongsTo(Project::class); }
     public function user(): BelongsTo { return $this->belongsTo(User::class); }
+    public function assessmentItem(): BelongsTo { return $this->belongsTo(Item::class, 'assessment_item_id'); }
 }

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\CertificateController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ResultsController;
 use App\Http\Controllers\UserController;
@@ -27,13 +28,6 @@ Route::get('/privacy-policy', function () {
 Route::get('/verify-email/{id}/{hash}', function (Request $request, $id, $hash) {
     $user = User::findOrFail($id);
 
-    $expires = $request->query('expires');
-
-    // Check expiration manually
-    if ($expires && now()->timestamp > $expires) {
-        return view('auth.verification-expired', ['email' => $user->email]);
-    }
-
     // Check if the hash matches
     if (! hash_equals((string) $hash, sha1($user->getEmailForVerification()))) {
         return view('auth.verification-failed', ['email' => $user->email]);
@@ -48,30 +42,19 @@ Route::get('/verify-email/{id}/{hash}', function (Request $request, $id, $hash) 
     }
 
     return view('auth.verification-success');
-})->name('verification.verify');
+})->middleware(['signed', 'throttle:6,1'])
+    ->name('verification.verify');
 
-Route::post('/verification/resend', function (Request $request) {
-    $request->validate([
-        'email' => 'required|email|exists:users,email',
-    ]);
-
-    $user = User::where('email', $request->email)->firstOrFail();
-
-    if ($user->hasVerifiedEmail()) {
-        return response()->json(['message' => 'Email is already verified.'], 400);
-    }
-
-    // Laravel built-in method sends the verification email
-    $user->sendEmailVerificationNotification();
-
-    return response()->json(['message' => 'Verification email resent.']);
-})->name('verification.resend');
+Route::post('/verification/resend', [AuthController::class, 'resendVerification'])
+    ->middleware('throttle:verification-resend')
+    ->name('verification.resend');
 
 Route::get('/reset-password/{token}', [AuthController::class, 'showResetForm'])
     ->name('password.reset');
 
 // routes/web.php
 Route::post('/reset-password', [AuthController::class, 'resetPassword'])
+    ->middleware('throttle:password-reset')
     ->name('password.update');
 
 // routes/web.php
@@ -87,10 +70,13 @@ Route::get('/link-expired', function () {
     return view('link-expired');
 })->name('link.expired');
 
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login', [AuthController::class, 'login']);
-Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+Route::post('/register', [AuthController::class, 'register'])
+    ->middleware('throttle:registration');
+Route::post('/login', [AuthController::class, 'login'])
+    ->middleware('throttle:login');
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])
+    ->middleware('throttle:password-recovery');
+Route::get('/certificates/verify/{verificationCode}', [CertificateController::class, 'verify']);
 
 Route::middleware('auth:sanctum')->group(function () {
     // Return the authenticated user (used by frontend at /api/me)
@@ -104,20 +90,37 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     // Search users to invite to a project (realtime picker).
     Route::get('/users', [UserController::class, 'search']);
+    Route::get('/projects/unread-counts', [ApiProjectMessageController::class, 'unreadCounts']);
+    Route::get('/projects/{project}/certificate', [CertificateController::class, 'show']);
+    Route::get('/projects/{project}/certificate/download', [CertificateController::class, 'download']);
 
-     Route::middleware('project.member')->group(function () {
-        Route::prefix('projects/{project}')->group(function () {
-            Route::get('messages', [ApiProjectMessageController::class, 'index']);
-            Route::post('messages', [ApiProjectMessageController::class, 'store']);
-            Route::post('attachments', [ProjectAttachmentController::class, 'store']);
-            Route::get('members', [ProjectMemberController::class, 'index']);
-            Route::post('members', [ProjectMemberController::class, 'store']);
-
-            // owner-only
-        });
-        Route::post('messages/{message}/reactions', [MessageReactionController::class, 'toggle'])->middleware('project.member');
-        Route::delete('members/{userId}', [ProjectMemberController::class, 'destroy']);
+    Route::prefix('projects/{project}')->group(function () {
+        Route::get('messages', [ApiProjectMessageController::class, 'index'])
+            ->middleware('project.permission:view_messages');
+        Route::get('messages/changes', [ApiProjectMessageController::class, 'changes'])
+            ->middleware('project.permission:view_messages');
+        Route::post('messages/read', [ApiProjectMessageController::class, 'markRead'])
+            ->middleware('project.permission:view_messages');
+        Route::get('members', [ProjectMemberController::class, 'index'])
+            ->middleware('project.permission:view_members');
+        Route::post('messages', [ApiProjectMessageController::class, 'store'])
+            ->middleware(['project.permission:send_messages', 'throttle:project-messages']);
+        Route::patch('messages/{message}', [ApiProjectMessageController::class, 'update'])
+            ->middleware('project.permission:send_messages');
+        Route::delete('messages/{message}', [ApiProjectMessageController::class, 'destroy'])
+            ->middleware('project.permission:send_messages');
+        Route::post('attachments', [ProjectAttachmentController::class, 'store'])
+            ->middleware('project.permission:upload_attachments');
+        Route::delete('attachments/{attachment}', [ProjectAttachmentController::class, 'destroy']);
+        Route::post('members', [ProjectMemberController::class, 'store'])
+            ->middleware('project.permission:manage_members');
+        Route::patch('members/{userId}/role', [ProjectMemberController::class, 'updateRole'])
+            ->middleware('project.permission:manage_roles');
+        Route::delete('members/{userId}', [ProjectMemberController::class, 'destroy'])
+            ->middleware('project.permission:manage_members');
     });
+    Route::post('messages/{message}/reactions', [MessageReactionController::class, 'toggle'])
+        ->middleware(['project.permission:send_messages', 'throttle:project-reactions']);
 
     Route::put('/user/update-profile-pic', [UserController::class, 'updateImage']);
     Route::patch('/user/profile', [UserController::class, 'updateProfile']);

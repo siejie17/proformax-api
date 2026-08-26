@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Project extends Model
 {
@@ -25,6 +26,10 @@ class Project extends Model
         'rating',
         'target_certification',
         'created_at',
+        'assessment_status',
+        'reviewed_by',
+        'reviewed_at',
+        'review_remarks',
     ];
 
     public $timestamps = false;
@@ -82,5 +87,35 @@ class Project extends Model
     public function messages(): HasMany
     {
         return $this->hasMany(ProjectMessage::class);
+    }
+
+    public function facilitatorAssignments(): HasMany
+    {
+        return $this->hasMany(FacilitatorAssignment::class);
+    }
+
+    public function reviews(): HasMany
+    {
+        return $this->hasMany(AssessmentReview::class);
+    }
+
+    public function itemReviews(): HasMany
+    {
+        return $this->hasMany(AssessmentItemReview::class);
+    }
+
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(Attachment::class);
+    }
+
+    public function certificates(): HasMany
+    {
+        return $this->hasMany(ProjectCertificate::class);
+    }
+
+    public function latestCertificate(): HasOne
+    {
+        return $this->hasOne(ProjectCertificate::class)->latestOfMany();
     }
 }

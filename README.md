@@ -270,9 +270,32 @@ For real delivery, configure SMTP (or another driver):
 
 Verification links use `APP_URL` (web routes under `/verify-email/...`).
 
+### Operational notifications
+
+Notification preferences are enforced when delivery is scheduled. Email and browser push are sent for project invitations, facilitator assignment changes, and assessment decisions. New project chat messages are push-only and never notify the sender.
+
+Browser push uses per-device Web Push subscriptions and VAPID. Generate a deployment key pair once, then store the output in the environment (never commit the private key):
+
+```bash
+php artisan push:vapid
+```
+
+```env
+FRONTEND_URL=https://app.example.com
+VAPID_SUBJECT=mailto:operations@example.com
+VAPID_PUBLIC_KEY=...
+VAPID_PRIVATE_KEY=...
+```
+
+The default push-service allowlist covers Chrome/Firefox/Safari/Edge providers. Extend `WEB_PUSH_ALLOWED_HOSTS` only when supporting another trusted provider. Both mail and push delivery are queued, so production must run a worker:
+
+```bash
+php artisan queue:work
+```
+
 ### API authentication (Sanctum)
 
-Mobile or SPA clients authenticate with **Bearer tokens** returned from `/api/login` and `/api/register`.
+Mobile or SPA clients authenticate with **Bearer tokens** returned from `/api/login` after email verification. Registration sends a verification email but does not issue a token.
 
 If a first-party SPA runs on another origin (e.g. `http://localhost:3000`), add it to stateful domains:
 
@@ -342,10 +365,11 @@ All routes in `routes/api.php` are prefixed with `/api`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/register` | Register user (sends verification email) |
-| `POST` | `/api/login` | Login, returns Sanctum token |
-| `POST` | `/api/forgot-password` | Request password reset |
-| `POST` | `/api/reset-password` | Reset password with token |
+| `POST` | `/api/register` | Register user (rate limited; sends verification email) |
+| `POST` | `/api/email/verification-notification` | Resend verification email (rate limited; generic response) |
+| `POST` | `/api/login` | Login verified user (rate limited), returns Sanctum token |
+| `POST` | `/api/forgot-password` | Request password reset (rate limited; generic response) |
+| `POST` | `/api/reset-password` | Reset password with token (rate limited; JSON response) |
 
 ### Protected endpoints (`Authorization: Bearer <token>`)
 
@@ -355,7 +379,7 @@ All routes in `routes/api.php` are prefixed with `/api`.
 | `GET` | `/api/form-inputs` | Assessment form schema |
 | `POST` | `/api/submit-assessment` | Submit assessment |
 | `POST` | `/api/results` | Calculate / fetch results |
-| `GET` | `/api/users/{userId}` | User profile |
+| `GET` | `/api/users/{userId}` | Authenticated user's own allowlisted profile |
 | `GET` | `/api/users/{userId}/projects` | User projects |
 | `GET` | `/api/projects/{projectId}` | Project details |
 | … | … | See `routes/api.php` for full list |
@@ -422,7 +446,7 @@ config/               # Laravel & Sanctum configuration
 | `Table already exists` on migrate | You imported `proformax.sql` — skip `migrate`; use `migrate:status` to confirm. |
 | Empty API / no form data | Confirm import succeeded (`SHOW TABLES` in `proformax`); check `DB_DATABASE=proformax` in `.env`, then `php artisan config:clear`. |
 | `No application encryption key` | Run `php artisan key:generate`. |
-| 401 on API routes | Send `Authorization: Bearer <token>` from login/register response. |
+| 401 on API routes | Verify the account, log in, then send the login response's `Authorization: Bearer <token>`. |
 | Emails not received locally | Check `storage/logs/laravel.log` when `MAIL_MAILER=log`. |
 | Profile images 404 | Run `php artisan storage:link`. |
 

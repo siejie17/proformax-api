@@ -18,9 +18,24 @@ class MessageResource extends JsonResource
             'replyToId'  => $this->reply_to_id ? (string) $this->reply_to_id : null,
             'isSystem'   => (bool) $this->is_system,
             'createdAt'  => $this->created_at?->toISOString(),
+            'editedAt'   => $this->updated_at && ! $this->updated_at->equalTo($this->created_at)
+                ? $this->updated_at->toISOString()
+                : null,
             // Flatten reactions to Record<emoji, userIds[]> like the frontend.
             'reactions'  => $this->when($this->relationLoaded('reactions'), fn () => $this->normalizeReactions()),
         ];
+    }
+
+    /**
+     * Return the frontend reaction shape for mutation responses.
+     *
+     * @return array<string, list<string>>
+     */
+    public function reactionsShape(): array
+    {
+        $this->resource->loadMissing('reactions');
+
+        return $this->normalizeReactions();
     }
 
     private function normalizeReactions(): array

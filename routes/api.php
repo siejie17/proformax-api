@@ -1,34 +1,41 @@
 <?php
 
+use App\Http\Controllers\Administration\ActivityLogController;
+use App\Http\Controllers\Administration\AssessmentController;
+use App\Http\Controllers\Administration\DashboardController;
+use App\Http\Controllers\Administration\RecommendationController;
+use App\Http\Controllers\Administration\ReferenceController;
+use App\Http\Controllers\Administration\UserManagementController;
 use App\Http\Controllers\Api\MediaController;
 use App\Http\Controllers\Api\MessageReactionController;
 use App\Http\Controllers\Api\ProjectAttachmentController;
 use App\Http\Controllers\Api\ProjectMemberController;
 use App\Http\Controllers\Api\ProjectMessageController as ApiProjectMessageController;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\CertificateController;
+use App\Http\Controllers\FormController;
+use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\PushSubscriptionController;
+use App\Http\Controllers\ResultsController;
+use App\Http\Controllers\UserController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-use App\Http\Controllers\AuthController;
-use App\Http\Controllers\FormController;
-use App\Http\Controllers\ResultsController;
-use App\Http\Controllers\UserController;
-use App\Http\Controllers\ProjectController;
-
 // Public routes
-Route::post('/register', [AuthController::class, 'register']);
+Route::post('/register', [AuthController::class, 'register'])
+    ->middleware('throttle:registration');
 
-// Resend verification link
-Route::post('/email/verification-notification', function (Request $request) {
-    if ($request->user()->hasVerifiedEmail()) {
-        return response()->json(['message' => 'Already verified']);
-    }
-    $request->user()->sendEmailVerificationNotification();
-    return response()->json(['message' => 'Verification link sent!']);
-})->name('verification.send');
+Route::post('/email/verification-notification', [AuthController::class, 'resendVerification'])
+    ->middleware('throttle:verification-resend')
+    ->name('verification.send');
 
-Route::post('/login', [AuthController::class, 'login']);
-Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+Route::post('/login', [AuthController::class, 'login'])
+    ->middleware('throttle:login');
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])
+    ->middleware('throttle:password-recovery');
+Route::post('/reset-password', [AuthController::class, 'resetPasswordApi'])
+    ->middleware('throttle:password-reset');
+Route::get('/certificates/verify/{verificationCode}', [CertificateController::class, 'verify']);
 
 // Example of route that requires verified email
 Route::get('/profile', function (Request $request) {
@@ -49,48 +56,103 @@ Route::middleware('auth:sanctum')->group(function () {
     // Search users to invite to a project (realtime picker).
     Route::get('/users', [UserController::class, 'search']);
     Route::get('/roles', [UserController::class, 'roles']);
+    Route::get('/projects/unread-counts', [ApiProjectMessageController::class, 'unreadCounts']);
+    Route::get('/projects/{project}/certificate', [CertificateController::class, 'show']);
+    Route::get('/projects/{project}/certificate/download', [CertificateController::class, 'download']);
 
     // Serve/download project attachments (authorization checked inside the controller).
     Route::get('/media/{filename}', [MediaController::class, 'show']);
     Route::get('/media/{filename}/download', [MediaController::class, 'download']);
 
-    // Read-only routes: any project member (viewer+) can access.
-    Route::middleware('project.viewer')->group(function () {
-        Route::prefix('projects/{project}')->group(function () {
-            Route::get('messages', [ApiProjectMessageController::class, 'index']);
-            Route::get('members', [ProjectMemberController::class, 'index']);
-        });
-    });
-
-
     Route::prefix('projects/{project}')->group(function () {
-        Route::post('messages', [ApiProjectMessageController::class, 'store']);
-        Route::post('attachments', [ProjectAttachmentController::class, 'store']);
-        Route::post('members', [ProjectMemberController::class, 'store']);
-        Route::post('members/{userId}/role', [ProjectMemberController::class, 'updateRole']);
+        Route::get('messages', [ApiProjectMessageController::class, 'index'])
+            ->middleware('project.permission:view_messages');
+        Route::get('messages/changes', [ApiProjectMessageController::class, 'changes'])
+            ->middleware('project.permission:view_messages');
+        Route::post('messages/read', [ApiProjectMessageController::class, 'markRead'])
+            ->middleware('project.permission:view_messages');
+        Route::get('members', [ProjectMemberController::class, 'index'])
+            ->middleware('project.permission:view_members');
+        Route::post('messages', [ApiProjectMessageController::class, 'store'])
+            ->middleware(['project.permission:send_messages', 'throttle:project-messages']);
+        Route::patch('messages/{message}', [ApiProjectMessageController::class, 'update'])
+            ->middleware('project.permission:send_messages');
+        Route::delete('messages/{message}', [ApiProjectMessageController::class, 'destroy'])
+            ->middleware('project.permission:send_messages');
+        Route::post('attachments', [ProjectAttachmentController::class, 'store'])
+            ->middleware('project.permission:upload_attachments');
+        Route::delete('attachments/{attachment}', [ProjectAttachmentController::class, 'destroy']);
+        Route::post('members', [ProjectMemberController::class, 'store'])
+            ->middleware('project.permission:manage_members');
+        Route::patch('members/{userId}/role', [ProjectMemberController::class, 'updateRole'])
+            ->middleware('project.permission:manage_roles');
+        Route::delete('members/{userId}', [ProjectMemberController::class, 'destroy'])
+            ->middleware('project.permission:manage_members');
     });
-    Route::post('messages/{message}/reactions', [MessageReactionController::class, 'toggle']);
-    Route::delete('members/{userId}', [ProjectMemberController::class, 'destroy']);
+    Route::post('messages/{message}/reactions', [MessageReactionController::class, 'toggle'])
+        ->middleware(['project.permission:send_messages', 'throttle:project-reactions']);
 
     Route::put('/user/update-profile-pic', [UserController::class, 'updateImage']);
     Route::patch('/user/profile', [UserController::class, 'updateProfile']);
+    Route::get('/push/config', [PushSubscriptionController::class, 'config']);
+    Route::post('/push/subscriptions', [PushSubscriptionController::class, 'store']);
+    Route::delete('/push/subscriptions', [PushSubscriptionController::class, 'destroy']);
     Route::put('/user/update-password', [UserController::class, 'updatePassword']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/form-inputs', [FormController::class, 'getFormInputs']);
-    Route::get('/projects/{projectId}', [ProjectController::class, 'showSelectedProject']);
+    Route::get('/projects/{projectId}', [ProjectController::class, 'showSelectedProject'])
+        ->middleware('project.viewer');
     Route::get('/users/{userId}/projects', [ProjectController::class, 'getUserProjects']);
     Route::get('/users/{userId}/projects/added-by-me', [ProjectController::class, 'getUserAddedMemberProjects']);
     Route::get('/users/{userId}/projects/added-to-me', [ProjectController::class, 'getUserAddedProjects']);
     Route::get('/users/{userId}', [UserController::class, 'getUserById']);
-    Route::patch('/users/{userId}/role', [UserController::class, 'updateRole']);
-    Route::patch('/user/role', [UserController::class, 'updateRole']);
     Route::get('/users/{userId}/preferences', [UserController::class, 'getPreferences']);
     Route::patch('/users/{userId}/preferences', [UserController::class, 'updatePreferences']);
+    // Read-only knowledge content for every authenticated user. Mutations remain
+    // protected inside the administration routes below.
+    Route::get('/content/references', [ReferenceController::class, 'publicIndex']);
+    Route::get('/content/recommendations', [RecommendationController::class, 'publicIndex']);
     Route::post('/results', [ResultsController::class, 'getResults']);
-    Route::get('/projects/{projectId}', [ProjectController::class, 'showSelectedProject']);
     Route::post('/submit-assessment', [ResultsController::class, 'submitAssessment']);
     Route::post('/projects/update-actual-cost', [ProjectController::class, 'updateActualCost']);
     Route::get('/projects/{projectId}/certification-cost', [ProjectController::class, 'getProjectCertificationCost']);
     Route::post('/projects/{projectId}/save-actual-changes', [ProjectController::class, 'saveProjectActualChanges']);
     Route::post('/assessment/prediction-cost', [ResultsController::class, 'getRealTimePrediction']);
+    Route::prefix('administration')->group(function () {
+        Route::middleware('system.role:super_admin')->prefix('super-admin')->group(function () {
+            Route::get('/activity-logs', [ActivityLogController::class, 'index']);
+            Route::get('/users', [UserManagementController::class, 'index']);
+            Route::patch('/users/{user}', [UserManagementController::class, 'updateAccount']);
+            Route::patch('/users/{user}/role', [UserManagementController::class, 'updateRole']);
+            Route::delete('/users/{user}', [UserManagementController::class, 'destroy']);
+        });
+
+        Route::middleware('system.role:admin,super_admin')->prefix('admin')->group(function () {
+            Route::get('/dashboard', DashboardController::class);
+            Route::get('/users', [UserManagementController::class, 'index']);
+            Route::patch('/users/{user}/role', [UserManagementController::class, 'updateRole']);
+            Route::delete('/users/{user}', [UserManagementController::class, 'destroy']);
+            Route::put('/references/upload', [ReferenceController::class, 'upload']);
+            Route::apiResource('references', ReferenceController::class)->except(['show']);
+            Route::patch('/recommendation-section', [RecommendationController::class, 'updateSection']);
+            Route::apiResource('recommendations', RecommendationController::class)->only(['index', 'store', 'update', 'destroy']);
+            Route::get('/assessments', [AssessmentController::class, 'index']);
+            Route::get('/assessments/{project}', [AssessmentController::class, 'show']);
+            Route::post('/assessments/{project}/assign', [AssessmentController::class, 'assign']);
+            Route::patch('/assignments/{assignment}', [AssessmentController::class, 'replace']);
+            Route::patch('/assessments/{project}/scores', [AssessmentController::class, 'rejectPredictedScoreUpdate']);
+            Route::patch('/assessments/{project}/actual-selections', [AssessmentController::class, 'updateActualSelections']);
+            Route::post('/assessments/{project}/review', [AssessmentController::class, 'review']);
+            Route::delete('/assessments/{project}/certificate', [CertificateController::class, 'revoke']);
+            Route::delete('/assignments/{assignment}', [AssessmentController::class, 'revoke']);
+        });
+
+        Route::middleware('system.role:facilitator_admin')->prefix('facilitator')->group(function () {
+            Route::get('/assessments', [AssessmentController::class, 'index']);
+            Route::get('/assessments/{project}', [AssessmentController::class, 'show']);
+            Route::patch('/assessments/{project}/scores', [AssessmentController::class, 'rejectPredictedScoreUpdate']);
+            Route::patch('/assessments/{project}/actual-selections', [AssessmentController::class, 'updateActualSelections']);
+            Route::post('/assessments/{project}/review', [AssessmentController::class, 'review']);
+        });
+    });
 });

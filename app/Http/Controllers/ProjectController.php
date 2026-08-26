@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ActualUserAnswer;
+use App\Models\AssessmentItemReview;
 use App\Models\Cost;
 use App\Models\Project;
 use App\Models\ProjectMember;
@@ -10,6 +11,7 @@ use App\Models\UserAnswer;
 use App\Models\Location;
 use App\Services\GreenElementsDataService;
 use App\Services\FormDataMappingService;
+use App\Services\CertificateService;
 use Exception;
 use Illuminate\Http\Request;
 
@@ -17,13 +19,16 @@ class ProjectController extends Controller
 {
     protected $greenElementsData;
     protected $formDataMappingService;
+    protected $certificateService;
 
     public function __construct(
         GreenElementsDataService $greenElementsData,
-        FormDataMappingService $formDataMappingService
+        FormDataMappingService $formDataMappingService,
+        CertificateService $certificateService,
     ) {
         $this->greenElementsData = $greenElementsData;
         $this->formDataMappingService = $formDataMappingService;
+        $this->certificateService = $certificateService;
     }
 
     /**
@@ -40,6 +45,7 @@ class ProjectController extends Controller
                     'structure:id,name',
                     'classification:id,name',
                     'location:id,location_name',
+                    'latestCertificate',
                 ])
                 ->latest()
                 ->get()
@@ -62,6 +68,7 @@ class ProjectController extends Controller
                         'created_at' => $project->created_at,
                         'certifications' => $this->formDataMappingService
                             ->getCertifications($project->building_type_id),
+                        'certificate' => $this->certificateService->payload($project->latestCertificate),
                     ];
                 });
 
@@ -101,6 +108,7 @@ class ProjectController extends Controller
                         'structure:id,name',
                         'classification:id,name',
                         'location:id,location_name',
+                        'latestCertificate',
                     ])
                     ->latest()
                     ->get()
@@ -140,6 +148,7 @@ class ProjectController extends Controller
                         'structure:id,name',
                         'classification:id,name',
                         'location:id,location_name',
+                        'latestCertificate',
                     ])
                     ->latest()
                     ->get()
@@ -183,6 +192,7 @@ class ProjectController extends Controller
                 'created_at' => $project->created_at,
                 'certifications' => $this->formDataMappingService
                     ->getCertifications($project->building_type_id),
+                'certificate' => $this->certificateService->payload($project->latestCertificate),
             ];
         });
     }
@@ -200,6 +210,7 @@ class ProjectController extends Controller
                 'classification:id,name',
                 'category:id,category',
                 'location:id,location_name',
+                'attachments' => fn ($query) => $query->whereNotNull('assessment_item_id'),
                 'costs'
             ])->find($projectId);
 
@@ -224,12 +235,30 @@ class ProjectController extends Controller
 
             $splitActualAnswers = $this->splitUserAnswers($actualUserAnswers);
 
+            $assessmentItemFeedback = AssessmentItemReview::query()
+                ->where('project_id', $projectId)
+                ->where('review_basis', 'actual')
+                ->whereNotNull('remarks')
+                ->where('remarks', '<>', '')
+                ->with('reviewer:id,first_name,last_name')
+                ->get()
+                ->map(fn ($review) => [
+                    'item_id' => (string) $review->item_id,
+                    'remarks' => $review->remarks,
+                    'reviewed_at' => $review->updated_at?->toISOString(),
+                    'reviewed_by' => $review->reviewer ? [
+                        'first_name' => $review->reviewer->first_name,
+                        'last_name' => $review->reviewer->last_name,
+                    ] : null,
+                ])->values();
+
             // Format costs in hierarchical structure
             $costBreakdown = $this->formatCostBreakdown($project->costs);
 
             // Format project data with selected fields from related models
             $projectData = $project->toArray();
             unset($projectData['costs']); // Remove unformatted costs
+            unset($projectData['attachments']);
             unset($projectData['user_id']); // Remove user info
             unset($projectData['structure_id']);
 
@@ -242,15 +271,17 @@ class ProjectController extends Controller
             $projectData['building_type_name'] = $project->buildingType?->name;
             $projectData['classification'] = $project->classification?->name;
             $projectData['structure'] = $project->structure?->name;
-            $projectData['category'] = $project->category?->category;
+            $category = $project->getRelation('category');
+            $projectData['category'] = $category?->category ?? $project->getRawOriginal('category');
 
-            $parentLocationId = Location::where('id', $project->location?->id)->first()?->parent_location_id;
+            $location = $project->getRelation('location');
+            $parentLocationId = $location?->parent_location_id;
 
             if ($parentLocationId != null) {
                 $parentLocation = Location::where('id', $parentLocationId)->first()?->location_name;
-                $projectData['location'] = $project->location?->location_name . ', ' . $parentLocation;
+                $projectData['location'] = $location->location_name . ', ' . $parentLocation;
             } else {
-                $projectData['location'] = $project->location?->location_name;
+                $projectData['location'] = $location?->location_name ?? $project->getRawOriginal('location');
             }
 
             return response()->json([
@@ -267,7 +298,21 @@ class ProjectController extends Controller
                     'actual_checked_options' => $splitActualAnswers['checkedOptions'],
                     'actual_selected_items' => $splitActualAnswers['selectedItems'],
                     'actual_custom_inputs' => $splitActualAnswers['customInputs'],
-                    'actual_answers_id' => $this->categoriseActualAnswerIds($actualUserAnswers)
+                    'actual_answers_id' => $this->categoriseActualAnswerIds($actualUserAnswers),
+                    'assessment_evidence' => $project->attachments->map(fn ($attachment) => [
+                        'id' => (string) $attachment->id,
+                        'item_id' => (string) $attachment->assessment_item_id,
+                        'uploaded_by' => (string) $attachment->user_id,
+                        'original_name' => $attachment->original_name,
+                        'filename' => $attachment->filename,
+                        'kind' => $attachment->kind,
+                        'size' => (int) $attachment->size,
+                        'uploaded_at' => $attachment->uploaded_at?->toISOString(),
+                    ])->values(),
+                    'assessment_item_feedback' => $assessmentItemFeedback,
+                    'certificate' => $this->certificateService->payload(
+                        $project->certificates()->latest('id')->first()
+                    ),
                 ]),
                 'green_elements' => $greenElements,
                 'certifications' => $this->formDataMappingService->getCertifications($buildingTypeId)
@@ -543,6 +588,19 @@ class ProjectController extends Controller
      */
     public function saveProjectActualChanges($projectId, Request $request)
     {
+        if (! $request->user()->hasSystemRole('admin', 'super_admin', 'facilitator_admin')) {
+            return response()->json([
+                'message' => 'Actual assessment selections are locked for users and can only be decided by an administrator.',
+            ], 403);
+        }
+
+        $project = Project::findOrFail($projectId);
+        if (! in_array($project->assessment_status, ['verified', 'certified'], true)) {
+            return response()->json([
+                'message' => 'The Predicted assessment must be verified before the Actual assessment can be reviewed.',
+            ], 422);
+        }
+
         $actualChanges = $request->input('actualChanges');
 
         try {
@@ -555,6 +613,23 @@ class ProjectController extends Controller
             $this->processSelectionChanges($projectId, $categorized['selection']);
             $this->processSubitemChanges($projectId, $categorized['subitem']);
             $this->processCustomChanges($projectId, $categorized['custom']);
+
+            if (! empty($actualChanges)) {
+                if ($project->assessment_status === 'certified') {
+                    $this->certificateService->revokeActive(
+                        $project,
+                        $request->user(),
+                        'Actual assessment answers changed after certificate issuance.',
+                    );
+                }
+                AssessmentItemReview::where('project_id', $projectId)->delete();
+                Project::where('id', $projectId)->update([
+                    'assessment_status' => 'verified',
+                    'reviewed_by' => null,
+                    'reviewed_at' => null,
+                    'review_remarks' => null,
+                ]);
+            }
 
             $actualAnswers = ActualUserAnswer::where('project_id', $projectId)
                 ->with(['item', 'subitem'])

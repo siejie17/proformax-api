@@ -53,8 +53,14 @@ class MediaController extends Controller
         $isMember = $project->members()
             ->where('user_id', $user->id)
             ->exists();
+        $isAdministrator = $user->hasSystemRole('admin', 'super_admin');
+        $isAssignedFacilitator = $user->hasSystemRole('facilitator_admin')
+            && $project->facilitatorAssignments()
+                ->where('user_id', $user->id)
+                ->where('status', 'active')
+                ->exists();
 
-        if (! $isOwner && ! $isMember) {
+        if (! $isOwner && ! $isMember && ! $isAdministrator && ! $isAssignedFacilitator) {
             abort(403, 'You are not a member of this project.');
         }
 
