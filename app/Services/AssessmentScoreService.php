@@ -184,7 +184,7 @@ class AssessmentScoreService
                     return true;
                 })->pluck('choice_key');
             } else {
-                $acceptedChoiceKeys = $submittedChoiceKeys;
+                $acceptedChoiceKeys = collect();
             }
             $actualChoices = $actualChoices->map(fn ($choice) => [
                 ...$choice,
