@@ -14,19 +14,22 @@ class MemberResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        $role = $this->role ?: $this->custom_role ?: $this->user?->effective_role_label;         // from the users table
+        $role = $this->resource->relationLoaded('role')
+            ? $this->resource->getRelation('role')
+            : $this->resource->role()->first();
 
         return [
             'membership' => [
-                'id'        => (string) $this->id,
+                'id' => (string) $this->id,
                 'projectId' => $this->project_id,
-                'userId'    => (string) $this->user_id,
-                'role'      => $role,
-                'roleId'    => $this->role ? $this->role_id : null,
+                'userId' => (string) $this->user_id,
+                'role' => $role?->name ?? 'member',
+                'roleId' => $role?->id,
+                'permissions' => $role?->permissions ?? [],
             ],
-            'user'    => $this->user ? new UserResource($this->user) : ['id' => (string) $this->user_id],
+            'user' => $this->user ? new UserResource($this->user) : ['id' => (string) $this->user_id],
             'isOwner' => $this->project?->user_id === $this->user_id,
-            'role'    => $role,
+            'role' => $role?->name ?? 'member',
         ];
     }
 }

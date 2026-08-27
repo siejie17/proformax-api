@@ -35,4 +35,14 @@ return [
         ],
     ],
 
+    'web_push' => [
+        'subject' => env('VAPID_SUBJECT', env('APP_URL')),
+        'public_key' => env('VAPID_PUBLIC_KEY'),
+        'private_key' => env('VAPID_PRIVATE_KEY'),
+        'allowed_hosts' => array_filter(array_map('trim', explode(',', env(
+            'WEB_PUSH_ALLOWED_HOSTS',
+            'fcm.googleapis.com,push.services.mozilla.com,web.push.apple.com,notify.windows.com'
+        )))),
+    ],
+
 ];

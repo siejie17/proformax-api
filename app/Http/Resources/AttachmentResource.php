@@ -17,6 +17,9 @@ class AttachmentResource extends JsonResource
         return [
             'id'         => (string) $this->id,
             'filename'   => $this->original_name,
+            'originalName' => $this->original_name,
+            'storedFilename' => $this->filename,
+            'assessmentItemId' => $this->assessment_item_id ? (string) $this->assessment_item_id : null,
             'mimeType'   => $this->mime_type,
             'kind'       => $this->kind,
             'size'       => (int) $this->size,

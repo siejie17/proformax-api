@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password as PasswordRule;
+use App\Support\ActivityLogger;
 
 class AuthController extends Controller
 {
@@ -24,7 +26,11 @@ class AuthController extends Controller
             'first_name' => 'required|string|max:50',
             'last_name'  => 'required|string|max:50',
             'email'      => 'required|string|email|unique:users',
-            'password'   => 'required|string|min:6',
+            'password'   => [
+                'required',
+                'string',
+                PasswordRule::min(8)->mixedCase()->numbers()->symbols(),
+            ],
         ]);
     
         DB::beginTransaction();
@@ -40,14 +46,13 @@ class AuthController extends Controller
     
             $user->sendEmailVerificationNotification();
     
-            $token = $user->createToken('auth_token')->plainTextToken;
-    
             DB::commit();
+
+            ActivityLogger::record($user, 'account_created', $user);
     
             return response()->json([
                 'message' => 'User registered successfully. Please check your email for verification link.',
                 'user' => $user,
-                'token' => $token,
             ], 201);
     
         } catch (\Exception $e) {
@@ -74,25 +79,23 @@ class AuthController extends Controller
 
         $user = User::where('email', $request->email)->first();
 
-        if (! $user) {
+        if (! $user || ! Hash::check($request->password, $user->password)) {
             return response()->json([
-                'message' => 'Invalid credentials',
-                'errors' => [
-                    'email' => ['No account found for this email.']
-                ]
+                'message' => 'Invalid credentials.',
             ], 401);
         }
 
-        if (! Hash::check($request->password, $user->password)) {
+        if (! $user->hasVerifiedEmail()) {
             return response()->json([
-                'message' => 'Invalid credentials',
-                'errors' => [
-                    'password' => ['Incorrect password.']
-                ]
-            ], 401);
+                'message' => 'Please verify your email before signing in.',
+                'reason' => 'email_unverified',
+                'user' => $user,
+            ], 403);
         }
 
         $token = $user->createToken('auth_token')->plainTextToken;
+
+        ActivityLogger::record($user, 'user_login', $user);
 
         return response()->json([
             'message' => 'Login successful',
@@ -101,58 +104,108 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * Resend an email verification link without revealing account state.
+     */
+    public function resendVerification(Request $request)
+    {
+        $data = $request->validate([
+            'email' => ['required', 'email'],
+        ]);
+
+        $user = User::where('email', $data['email'])->first();
+
+        if ($user && ! $user->hasVerifiedEmail()) {
+            $user->sendEmailVerificationNotification();
+        }
+
+        return response()->json([
+            'message' => 'If an unverified account exists for that email, a verification link has been sent.',
+        ]);
+    }
+
     // Forgot password (send reset link)
     public function forgotPassword(Request $request)
     {
         $request->validate(['email' => 'required|email']);
 
-        $status = Password::sendResetLink(
-            $request->only('email')
-        );
+        try {
+            Password::sendResetLink($request->only('email'));
+        } catch (\Throwable $exception) {
+            Log::error('Password reset link delivery failed.', [
+                'exception' => $exception,
+            ]);
+        }
 
-        return $status === Password::RESET_LINK_SENT
-            ? response()->json(['message' => 'Reset link sent to your email.'])
-            : response()->json(['message' => 'Unable to send reset link.'], 400);
+        return response()->json([
+            'message' => 'If an account exists for that email, a password reset link has been sent.',
+        ]);
     }
 
-    // Reset password (using token)
+    /**
+     * Reset a password from the browser form.
+     */
     public function resetPassword(Request $request)
     {
+        return $this->performPasswordReset($request, false);
+    }
+
+    /**
+     * Reset a password through the JSON API.
+     */
+    public function resetPasswordApi(Request $request)
+    {
+        return $this->performPasswordReset($request, true);
+    }
+
+    private function performPasswordReset(Request $request, bool $jsonResponse)
+    {
         $request->validate([
-            'email' => 'required|email',
-            'token' => 'required',
-            'password' => 'required|min:6|confirmed',
+            'email' => ['required', 'email'],
+            'token' => ['required', 'string'],
+            'password' => [
+                'required',
+                'string',
+                'confirmed',
+                PasswordRule::min(8)->mixedCase()->numbers()->symbols(),
+            ],
         ]);
-        
+
         $status = Password::reset(
             $request->only('email', 'password', 'password_confirmation', 'token'),
             function (User $user, string $password) {
                 $user->forceFill([
-                    'password' => Hash::make($password)
+                    'password' => Hash::make($password),
                 ])->setRememberToken(Str::random(60));
- 
+
                 $user->save();
- 
+                $user->tokens()->delete();
+
                 event(new PasswordReset($user));
             }
         );
 
-        // If the reset was successful
         if ($status === Password::PasswordReset) {
-            return view('auth.password-reset-success');
+            return $jsonResponse
+                ? response()->json(['message' => 'Password reset successfully.'])
+                : view('auth.password-reset-success');
         }
-        
-        // If the token was invalid or expired...
-        if ($status === Password::INVALID_TOKEN) {
-            return redirect()->route('link.expired')->with('reset_expired', true);
+
+        if ($jsonResponse) {
+            return response()->json([
+                'message' => 'Unable to reset password.',
+                'errors' => [
+                    'token' => ['The password reset token is invalid or expired.'],
+                ],
+            ], 422);
         }
-    
-        // For any other error (like user not found)
-        return back()->withErrors(['email' => [__($status)]]);
+
+        return redirect()->route('link.expired')->with('reset_expired', true);
     }
 
     public function logout(Request $request)
     {
+        ActivityLogger::record($request->user(), 'user_logout', $request->user());
         $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Logged out successfully']);

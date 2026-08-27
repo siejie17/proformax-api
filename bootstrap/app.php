@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Middleware\EnsureProjectMember;
+use App\Http\Middleware\EnsureProjectPermission;
 use App\Http\Middleware\EnsureProjectViewer;
+use App\Http\Middleware\EnsureSystemRole;
 use App\Http\Middleware\IsProjectOwner;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -10,9 +12,9 @@ use Illuminate\Http\Middleware\HandleCors;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
-        web: __DIR__ . '/../routes/web.php',
-        api: __DIR__ . '/../routes/api.php',
-        commands: __DIR__ . '/../routes/console.php',
+        web: __DIR__.'/../routes/web.php',
+        api: __DIR__.'/../routes/api.php',
+        commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
@@ -22,7 +24,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'project.member' => EnsureProjectMember::class,
             'project.viewer' => EnsureProjectViewer::class,
-            'project.owner'  => IsProjectOwner::class,
+            'project.owner' => IsProjectOwner::class,
+            'project.permission' => EnsureProjectPermission::class,
+            'system.role' => EnsureSystemRole::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -29,6 +29,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'email_notifications',
         'push_notifications',
         'role_id',
+        'system_role',
     ];
 
     /**
@@ -95,5 +96,20 @@ class User extends Authenticatable implements MustVerifyEmail
     public function projectMessages(): HasMany
     {
         return $this->hasMany(ProjectMessage::class);
+    }
+
+    public function facilitatorAssignments(): HasMany
+    {
+        return $this->hasMany(FacilitatorAssignment::class);
+    }
+
+    public function pushSubscriptions(): HasMany
+    {
+        return $this->hasMany(PushSubscription::class);
+    }
+
+    public function hasSystemRole(string ...$roles): bool
+    {
+        return in_array($this->system_role ?? 'user', $roles, true);
     }
 }

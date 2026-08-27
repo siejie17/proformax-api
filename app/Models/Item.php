@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
 
 class Item extends Model
 {
@@ -15,7 +16,9 @@ class Item extends Model
 
     public function subcriterion()
     {
-        return $this->belongsTo(Subcriterion::class);
+        $foreignKey = Schema::hasColumn('items', 'subcriterion_id') ? 'subcriterion_id' : 'subcriteria_id';
+
+        return $this->belongsTo(Subcriterion::class, $foreignKey);
     }
 
     public function subitems()
