@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\AttachmentResource;
 use App\Models\Attachment;
 use App\Models\Project;
+use App\Services\AssessmentEvidenceReadinessService;
 use App\Services\CertificateService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -14,7 +15,10 @@ class ProjectAttachmentController extends Controller
 {
     private const MAX_EVIDENCE_PER_ITEM = 5;
 
-    public function __construct(private readonly CertificateService $certificates) {}
+    public function __construct(
+        private readonly CertificateService $certificates,
+        private readonly AssessmentEvidenceReadinessService $evidenceReadiness,
+    ) {}
 
     public function store(Request $request, Project $project)
     {
@@ -30,9 +34,9 @@ class ProjectAttachmentController extends Controller
         ]);
 
         if (isset($data['assessment_item_id'])) {
-            if (! in_array($project->assessment_status, ['verified', 'certified'], true)) {
+            if (! $project->allowsActualReview()) {
                 return response()->json([
-                    'message' => 'Evidence can be submitted only after the Predicted assessment is verified.',
+                    'message' => 'Evidence can be submitted only after the Predicted assessment is submitted.',
                 ], 422);
             }
 
@@ -65,6 +69,10 @@ class ProjectAttachmentController extends Controller
             'size'          => $file->getSize(),
         ]);
 
+        if ($attachment->assessment_item_id) {
+            $this->evidenceReadiness->sync($project, $request->user());
+        }
+
         return (new AttachmentResource($attachment))->response()->setStatusCode(201);
     }
 
@@ -92,6 +100,8 @@ class ProjectAttachmentController extends Controller
         Storage::disk('public')->delete($attachment->path);
         $attachment->delete();
 
+        $this->evidenceReadiness->sync($project, $user);
+
         if ($project->assessment_status === 'certified') {
             $this->certificates->revokeActive(
                 $project,
@@ -99,7 +109,7 @@ class ProjectAttachmentController extends Controller
                 'Assessment evidence was removed after certificate issuance.',
             );
             $project->update([
-                'assessment_status' => 'verified',
+                'assessment_status' => 'submitted',
                 'reviewed_by' => null,
                 'reviewed_at' => null,
                 'review_remarks' => null,

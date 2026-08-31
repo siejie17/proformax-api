@@ -595,9 +595,17 @@ class ProjectController extends Controller
         }
 
         $project = Project::findOrFail($projectId);
-        if (! in_array($project->assessment_status, ['verified', 'certified'], true)) {
+        if ($request->user()->hasSystemRole('facilitator_admin')) {
+            $isAssigned = $project->facilitatorAssignments()
+                ->where('user_id', $request->user()->id)
+                ->where('status', 'active')
+                ->exists();
+            abort_unless($isAssigned, 403, 'You are not appointed to this project.');
+        }
+
+        if (! $project->allowsActualReview()) {
             return response()->json([
-                'message' => 'The Predicted assessment must be verified before the Actual assessment can be reviewed.',
+                'message' => 'The Predicted assessment must be submitted before the Actual assessment can be reviewed.',
             ], 422);
         }
 
@@ -624,7 +632,7 @@ class ProjectController extends Controller
                 }
                 AssessmentItemReview::where('project_id', $projectId)->delete();
                 Project::where('id', $projectId)->update([
-                    'assessment_status' => 'verified',
+                    'assessment_status' => 'submitted',
                     'reviewed_by' => null,
                     'reviewed_at' => null,
                     'review_remarks' => null,

@@ -25,10 +25,10 @@ class AssessmentScoreService
                     $inner->where('direct_criteria.building_type_id', $project->building_type_id)
                         ->orWhere('sub_criteria.building_type_id', $project->building_type_id);
                 })
-                ->selectRaw('items.id, items.description, items.info, items.marks, items.subitems_exist, COALESCE(direct_criteria.name, sub_criteria.name) as criterion_name, subcriteria.name as subcriterion_name');
+                ->selectRaw('items.id, items.description, items.info, items.esg, items.suggestions, items.marks, items.subitems_exist, COALESCE(direct_criteria.name, sub_criteria.name) as criterion_name, subcriteria.name as subcriterion_name');
         } else {
             $query->where('sub_criteria.building_type_id', $project->building_type_id)
-                ->selectRaw('items.id, items.description, items.info, items.marks, items.subitems_exist, sub_criteria.name as criterion_name, subcriteria.name as subcriterion_name');
+                ->selectRaw('items.id, items.description, items.info, items.esg, items.suggestions, items.marks, items.subitems_exist, sub_criteria.name as criterion_name, subcriteria.name as subcriterion_name');
         }
 
         $items = $query->orderBy('items.id')->get();
@@ -184,7 +184,7 @@ class AssessmentScoreService
                     return true;
                 })->pluck('choice_key');
             } else {
-                $acceptedChoiceKeys = $submittedChoiceKeys;
+                $acceptedChoiceKeys = collect();
             }
             $actualChoices = $actualChoices->map(fn ($choice) => [
                 ...$choice,
@@ -203,6 +203,8 @@ class AssessmentScoreService
                 'subcriterion' => $item->subcriterion_name,
                 'description' => $item->description,
                 'info' => $item->info,
+                'esg' => $item->esg,
+                'suggestions' => $item->suggestions,
                 'max_score' => $maxScore,
                 'predicted_score' => $predictedScore,
                 'predicted_selections' => $predicted['selections'][$itemId] ?? [],
@@ -240,7 +242,6 @@ class AssessmentScoreService
             'total_items' => count($rows),
             'all_actual_reviewed' => $allActualReviewed,
             'calculated_certification_level' => $allActualReviewed ? $this->certificationLevel($project, $actualTotal) : null,
-            'verification_status' => in_array($project->assessment_status, ['verified', 'certified'], true) ? 'verified' : 'not_verified',
             'certification_status' => $project->assessment_status === 'certified' ? 'certified' : 'not_certified',
         ];
     }
@@ -336,7 +337,6 @@ class AssessmentScoreService
             'total_items' => 0,
             'all_actual_reviewed' => false,
             'calculated_certification_level' => null,
-            'verification_status' => in_array($project->assessment_status, ['verified', 'certified'], true) ? 'verified' : 'not_verified',
             'certification_status' => $project->assessment_status === 'certified' ? 'certified' : 'not_certified',
         ];
     }
