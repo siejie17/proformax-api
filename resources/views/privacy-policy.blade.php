@@ -164,7 +164,7 @@
             <h3>2.3 Third-Party Information:</h3>
             <ul>
                 <li>Analytics data through Google Analytics</li>
-                <li>AI Processing data sent to Google Gemini API</li>
+                <li>AI processing data sent to the OpenAI API</li>
             </ul>
         </section>
 
@@ -188,7 +188,7 @@
             <p>We may share your information with:</p>
             <ul>
                 <li>Google/Firebase (for authentication, analytics, and cloud services)</li>
-                <li>Google Gemini AI (for AI assistant features)</li>
+                <li>OpenAI (for AI Assistant features)</li>
                 <li>Service providers who help operate the app</li>
                 <li>Legal authorities when required by law</li>
             </ul>
