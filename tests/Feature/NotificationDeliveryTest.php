@@ -47,9 +47,17 @@ class NotificationDeliveryTest extends TestCase
         Bus::fake();
         $delivery = app(NotificationDeliveryService::class);
 
-        $delivery->deliver($this->user, 'Assessment verified', 'Your assessment was verified.', '/projects/1');
+        $delivery->deliver($this->user, 'Assessment verified', 'Your assessment was verified.', '/projects/1', true, null, null);
 
         Notification::assertSentTo($this->user, ProjectActivityEmail::class);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $this->user->id,
+            'actor_user_id' => null,
+            'project_id' => null,
+            'title' => 'Assessment verified',
+            'message' => 'Your assessment was verified.',
+            'type' => 'project_activity',
+        ]);
         Bus::assertNotDispatched(DeliverPushNotification::class);
 
         Notification::fake();

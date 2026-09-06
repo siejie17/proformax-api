@@ -65,7 +65,9 @@ class ProjectController extends Controller
                         'adjusted_cost' => $project->adjusted_cost,
                         'rating' => $project->rating,
                         'target_certification' => $project->target_certification,
+                        'changed_cert' => $project->changed_cert,
                         'created_at' => $project->created_at,
+                        'status' => ucfirst(str_replace('_', ' ', $project->assessment_status)),
                         'certifications' => $this->formDataMappingService
                             ->getCertifications($project->building_type_id),
                         'certificate' => $this->certificateService->payload($project->latestCertificate),
@@ -189,6 +191,8 @@ class ProjectController extends Controller
                 'adjusted_cost' => $project->adjusted_cost,
                 'rating' => $project->rating,
                 'target_certification' => $project->target_certification,
+                'changed_cert' => $project->changed_cert,
+                'status' => ucfirst(str_replace('_', ' ', $project->assessment_status)),
                 'created_at' => $project->created_at,
                 'certifications' => $this->formDataMappingService
                     ->getCertifications($project->building_type_id),
@@ -310,6 +314,7 @@ class ProjectController extends Controller
                         'uploaded_at' => $attachment->uploaded_at?->toISOString(),
                     ])->values(),
                     'assessment_item_feedback' => $assessmentItemFeedback,
+                    'status' => $project->assessment_status,
                     'certificate' => $this->certificateService->payload(
                         $project->certificates()->latest('id')->first()
                     ),
@@ -521,6 +526,7 @@ class ProjectController extends Controller
     public function updateActualCost(Request $request)
     {
         $request->validate([
+            'projectId'      => 'required|integer',
             'changedNodes'   => 'array',
             'newNodes'       => 'array',
             'changedPct'     => 'array',
@@ -561,13 +567,49 @@ class ProjectController extends Controller
             }
 
             // Create new
-            foreach ($request->input('newNodes', []) as $node) {
-                Cost::create([
-                    'parent_id'   => $node['parentId'],
-                    'description' => $node['description'],
-                    'cost'        => $node['cost'] ?? 0,
-                    'actual_cost' => $node['actualCost'],
+            $projectId = $request->input('projectId');
+            $newNodes = $request->input('newNodes', []);
+
+            // First pass: create every node (parent_id resolved afterwards) so
+            // we always have a server id for client-side parent references.
+            $clientToServerId = [];
+            $created = [];
+            foreach ($newNodes as $node) {
+                $cost = Cost::create([
+                    'project_id'  => $projectId,
+                    'code'        => 'NEW-' . uniqid() . '-' . (count($clientToServerId) + 1),
+                    'description' => $node['description'] ?? '',
+                    'item_cost'   => $node['cost'] ?? 0,
+                    'actual_cost' => $node['actualCost'] ?? 0,
+                    'parent_id'   => null,
+                    'level'       => 0,
                 ]);
+
+                $clientId = $node['id'] ?? null;
+                if ($clientId !== null) {
+                    $clientToServerId[$clientId] = $cost->id;
+                }
+                $created[] = [
+                    'model'      => $cost,
+                    'parentRef'  => $node['parentId'] ?? null,
+                ];
+            }
+
+            // Second pass: wire up parent_id / level using the resolved ids.
+            foreach ($created as $item) {
+                $parentRef = $item['parentRef'];
+                if ($parentRef === null) {
+                    continue;
+                }
+
+                $parentServerId = is_string($parentRef) && isset($clientToServerId[$parentRef])
+                    ? $clientToServerId[$parentRef]
+                    : $parentRef;
+
+                $parentModel = Cost::find($parentServerId);
+                $item['model']->parent_id = $parentServerId;
+                $item['model']->level = $parentModel ? $parentModel->level + 1 : 0;
+                $item['model']->save();
             }
 
             return response()->json([

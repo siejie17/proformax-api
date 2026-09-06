@@ -204,6 +204,7 @@ class ResultsController extends Controller
                         'adjusted_cost' => $costsData['total_cost'],
                         'rating' => $rating,
                         'target_certification' => $formData['certifiedRatingScale'],
+                        'changed_cert' => $formData['changedCert'] ?? false,
                         'created_at' => now(),
                     ]);
 
@@ -225,14 +226,19 @@ class ResultsController extends Controller
             });
 
             // Save checked items and subitems in its own transaction
-            DB::transaction(function () use ($projectId, $checkedItems) {
-                try {
-                    $this->saveUserAnswers($projectId, $checkedItems);
-                } catch (Exception $e) {
-                    Log::error('Failed to save user answers: ' . $e->getMessage());
-                    throw $e;
-                }
-            });
+            if (
+                $formData['certifiedRatingScale'] !== "Not Certified"
+                || $formData['changedCert'] === true
+            ) {
+                DB::transaction(function () use ($projectId, $checkedItems) {
+                    try {
+                        $this->saveUserAnswers($projectId, $checkedItems);
+                    } catch (Exception $e) {
+                        Log::error('Failed to save user answers: ' . $e->getMessage());
+                        throw $e;
+                    }
+                });
+            }
 
             // Add the current user to the project chat as the first member
             DB::transaction(function () use ($projectId, $userId) {

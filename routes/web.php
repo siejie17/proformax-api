@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\ProjectMemberController;
 use App\Http\Controllers\Api\ProjectMessageController as ApiProjectMessageController;   
 
 use App\Http\Controllers\FormController;
+use App\Http\Controllers\NotificationController;
 
 Route::get('/', function () {
     return view('welcome');
@@ -93,6 +94,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/projects/unread-counts', [ApiProjectMessageController::class, 'unreadCounts']);
     Route::get('/projects/{project}/certificate', [CertificateController::class, 'show']);
     Route::get('/projects/{project}/certificate/download', [CertificateController::class, 'download']);
+
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::patch('/notifications/{notification}/read', [NotificationController::class, 'markAsRead']);
+    Route::patch('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
 
     Route::prefix('projects/{project}')->group(function () {
         Route::get('messages', [ApiProjectMessageController::class, 'index'])

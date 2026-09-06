@@ -22,7 +22,7 @@ class UserController extends Controller
 
     private const PROFILE_PICTURE_MAX_DATA_URL_LENGTH = 2_800_000;
 
-    private const PROFILE_PICTURE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+    private const PROFILE_PICTURE_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
     public function roles(Request $request): JsonResponse
     {
@@ -41,9 +41,18 @@ class UserController extends Controller
     {
         abort_unless((int) $request->user()->id === $userId, 403);
 
+        $user = User::withCount('projects')->find($userId);
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found.'
+            ], 404);
+        }
+
         return response()->json([
             'success' => true,
-            'user' => new UserResource($request->user()),
+            'user' => $user,
         ]);
     }
 
@@ -105,7 +114,7 @@ class UserController extends Controller
 
     private function validateProfilePicture(string $dataUrl): string
     {
-        if (! preg_match('/\Adata:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+\/=]+)\z/i', $dataUrl, $matches)) {
+        if (! preg_match('/\Adata:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+\/=]+)\z/i', $dataUrl, $matches)) {
             $this->invalidProfilePicture('The profile picture must be a base64-encoded JPEG, PNG, or WebP image.');
         }
 

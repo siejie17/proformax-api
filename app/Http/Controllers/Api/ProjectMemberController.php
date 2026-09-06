@@ -36,18 +36,24 @@ class ProjectMemberController extends Controller
         abort_unless($memberRoleId, 500, 'The default project role is not configured.');
 
         $added = [];
+        $actor = $request->user();
+
         foreach ($request->user_ids as $userId) {
-            $didCreate = ProjectMember::firstOrCreate([
+        $membership = ProjectMember::firstOrCreate(
+            [
                 'project_id' => $project->id,
                 'user_id' => $userId,
-            ], [
-                'added_by' => $request->user()->id,
+            ],
+            [
+                'added_by' => $actor->id,
                 'role_id' => $memberRoleId,
-            ]);
-            if ($didCreate->wasRecentlyCreated) {
-                $added[] = $didCreate->load('user');
-            }
+            ]
+        );
+
+        if ($membership->wasRecentlyCreated) {
+            $added[] = $membership->load('user');
         }
+    }
 
         if ($added) {
             $members = json_encode($this->index($request, $project)->resolve(request()), JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
@@ -66,6 +72,9 @@ class ProjectMemberController extends Controller
                         'Added to '.$project->name,
                         $request->user()->first_name.' '.$request->user()->last_name.' added you to the project.',
                         '/projects/'.$project->id,
+                        true,
+                        $request->user(),
+                        $project->id,
                     );
                 }
             }

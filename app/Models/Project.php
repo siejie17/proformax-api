@@ -30,13 +30,14 @@ class Project extends Model
         'reviewed_by',
         'reviewed_at',
         'review_remarks',
+        'changed_cert',
     ];
 
     public $timestamps = false;
 
     public function buildingType()
     {
-        return $this->belongsTo(BuildingType::class);
+        return $this->belongsTo(BuildingType::class, 'building_type_id');
     }
 
     public function category()
@@ -78,7 +79,7 @@ class Project extends Model
     {
         return $this->belongsTo(User::class, 'user_id');
     }
-    
+
     public function members(): HasMany
     {
         return $this->hasMany(ProjectMember::class);

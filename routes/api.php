@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Administration\ActivityLogController;
+use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Administration\AssessmentController;
 use App\Http\Controllers\Administration\DashboardController;
 use App\Http\Controllers\Administration\RecommendationController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\Api\ProjectMessageController as ApiProjectMessageContro
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CertificateController;
 use App\Http\Controllers\FormController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\PushSubscriptionController;
 use App\Http\Controllers\ResultsController;
@@ -100,6 +102,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/user/update-password', [UserController::class, 'updatePassword']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/form-inputs', [FormController::class, 'getFormInputs']);
+    Route::get('/analytics', [AnalyticsController::class, 'index']);
     Route::get('/projects/{projectId}', [ProjectController::class, 'showSelectedProject'])
         ->middleware('project.viewer');
     Route::get('/users/{userId}/projects', [ProjectController::class, 'getUserProjects']);
@@ -118,6 +121,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/projects/{projectId}/certification-cost', [ProjectController::class, 'getProjectCertificationCost']);
     Route::post('/projects/{projectId}/save-actual-changes', [ProjectController::class, 'saveProjectActualChanges']);
     Route::post('/assessment/prediction-cost', [ResultsController::class, 'getRealTimePrediction']);
+
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::patch('/notifications/{notification}/read', [NotificationController::class, 'markAsRead']);
+    Route::patch('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
+
     Route::prefix('administration')->group(function () {
         Route::middleware('system.role:super_admin')->prefix('super-admin')->group(function () {
             Route::get('/activity-logs', [ActivityLogController::class, 'index']);
@@ -128,7 +137,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
 
         Route::middleware('system.role:admin,super_admin')->prefix('admin')->group(function () {
-            Route::get('/dashboard', DashboardController::class);
+            Route::get('/dashboard', [DashboardController::class, 'index']              );
             Route::get('/users', [UserManagementController::class, 'index']);
             Route::patch('/users/{user}/role', [UserManagementController::class, 'updateRole']);
             Route::delete('/users/{user}', [UserManagementController::class, 'destroy']);

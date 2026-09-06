@@ -41,6 +41,36 @@ class SystemRoleAuthorizationTest extends TestCase
         $this->getJson('/api/administration/admin/dashboard')->assertForbidden();
     }
 
+    public function test_normal_user_can_access_project_analytics(): void
+    {
+        Sanctum::actingAs($this->user('user'));
+
+        $this->getJson('/api/analytics')
+            ->assertOk()
+            ->assertJsonStructure([
+                'filters' => ['category'],
+                'metrics' => [
+                    'total_projects',
+                    'potential_cost_savings',
+                    'average_predicted_gbi_score',
+                    'certified_projects',
+                ],
+                'cost_trend' => [
+                    '*' => ['month', 'budgeted_cost', 'projected_actual_cost'],
+                ],
+            ])
+            ->assertJsonCount(6, 'cost_trend');
+    }
+
+    public function test_project_analytics_rejects_unknown_category(): void
+    {
+        Sanctum::actingAs($this->user('admin'));
+
+        $this->getJson('/api/analytics?category=unknown')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['category']);
+    }
+
     public function test_admin_can_access_dashboard_but_not_superadmin_logs(): void
     {
         Sanctum::actingAs($this->user('admin'));

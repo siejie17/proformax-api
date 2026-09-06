@@ -93,6 +93,20 @@ class AuthController extends Controller
             ], 403);
         }
 
+        if (! $user->email_verified_at) {
+            return response()->json([
+                'message' => 'Please verify your email before logging in. Check your inbox for the verification link.',
+                'code' => 'email_not_verified',
+            ], 403);
+        }
+
+        if (! $user->email_verified_at) {
+            return response()->json([
+                'message' => 'Please verify your email before logging in. Check your inbox for the verification link.',
+                'code' => 'email_not_verified',
+            ], 403);
+        }
+
         $token = $user->createToken('auth_token')->plainTextToken;
 
         ActivityLogger::record($user, 'user_login', $user);
@@ -115,13 +129,31 @@ class AuthController extends Controller
 
         $user = User::where('email', $data['email'])->first();
 
-        if ($user && ! $user->hasVerifiedEmail()) {
+        if (! $user) {
+            return response()->json([
+                'message' => 'No account found for this email.',
+            ], 404);
+        }
+
+        if ($user->email_verified_at) {
+            return response()->json([
+                'message' => 'This email is already verified. You can log in.',
+            ], 200);
+        }
+
+        try {
             $user->sendEmailVerificationNotification();
+        } catch (\Exception $e) {
+            Log::error('Resend verification failed: ' . $e->getMessage());
+
+            return response()->json([
+                'message' => 'Unable to send the verification email. Please try again later.',
+            ], 500);
         }
 
         return response()->json([
-            'message' => 'If an unverified account exists for that email, a verification link has been sent.',
-        ]);
+            'message' => 'Verification link sent. Please check your email.',
+        ], 200);
     }
 
     // Forgot password (send reset link)
