@@ -135,6 +135,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/form-inputs', [FormController::class, 'getFormInputs']);
     Route::get('/projects/{projectId}', [ProjectController::class, 'showSelectedProject']);
     Route::get('/users/{userId}/projects', [ProjectController::class, 'getUserProjects']);
+    Route::get('/users/{userId}/projects/actual-ratings', [ProjectController::class, 'getUserActualRatings']);
     Route::get('/users/{userId}', [UserController::class, 'getUserById']);
     Route::get('/users/{userId}/preferences', [UserController::class, 'getPreferences']);
     Route::patch('/users/{userId}/preferences', [UserController::class, 'updatePreferences']);

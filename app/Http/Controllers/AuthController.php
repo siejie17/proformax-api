@@ -44,9 +44,9 @@ class AuthController extends Controller
                 "role_id" => 4,
             ]);
     
-            $user->sendEmailVerificationNotification();
-    
             DB::commit();
+
+            $user->sendEmailVerificationNotification();
 
             ActivityLogger::record($user, 'account_created', $user);
     

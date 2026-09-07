@@ -87,6 +87,198 @@ class ProjectController extends Controller
     }
 
     /**
+     * Compute actual assessment marks for a set of projects in a single
+     * request. Replaces the previous frontend behaviour of firing one full
+     * /projects/{id} request per project purely to derive actual_rating — that
+     * was an N+1 pattern. Here all actual answers are loaded in one query and
+     * green elements are computed once per distinct building-type key.
+     *
+     * Accepts the project ids to score via the `project_ids` query parameter
+     * (comma separated), so it works for both owned and shared project lists.
+     */
+    public function getUserActualRatings(Request $request)
+    {
+        try {
+            $projectIdsParam = $request->input('project_ids');
+            $projectIds = array_filter(array_map('intval', explode(',', (string)$projectIdsParam)));
+
+            if (empty($projectIds)) {
+                return response()->json([
+                    'success' => true,
+                    'ratings' => [],
+                ], 200);
+            }
+
+            // Load every actual answer for these projects in one query,
+            // grouped per project so we can split them like showSelectedProject.
+            $answers = ActualUserAnswer::whereIn('project_id', $projectIds)
+                ->get()
+                ->groupBy('project_id');
+
+            $projects = Project::whereIn('id', $projectIds)
+                ->get(['id', 'building_type_id', 'classification_id', 'has_management']);
+
+            $greenCache = [];
+            $ratings = [];
+
+            foreach ($projects as $project) {
+                $key = $project->building_type_id . '|'
+                    . ($project->classification_id ?? '') . '|'
+                    . ($project->has_management ?? '');
+
+                if (!isset($greenCache[$key])) {
+                    $greenCache[$key] = $this->greenElementsData->getGreenElementsData(
+                        $project->building_type_id,
+                        $project->classification_id ?? null,
+                        $project->has_management ?? null,
+                        false
+                    );
+                }
+
+                $split = $this->splitUserAnswers($answers->get($project->id, collect()));
+
+                $ratings[] = [
+                    'project_id' => $project->id,
+                    'actual_rating' => $this->computeActualMarks(
+                        $greenCache[$key],
+                        [
+                            'actual_checked_items' => $split['checkedItems'],
+                            'actual_checked_options' => $split['checkedOptions'],
+                            'actual_selected_items' => $split['selectedItems'],
+                            'actual_checked_subitems' => $split['checkedSubitems'],
+                            'actual_custom_inputs' => $split['customInputs'],
+                        ]
+                    ),
+                ];
+            }
+
+            $ratingsById = [];
+            foreach ($ratings as $r) {
+                $ratingsById[(int)$r['project_id']] = $r['actual_rating'];
+            }
+
+            return response()->json([
+                'success' => true,
+                'ratings' => $ratingsById,
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving actual ratings: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Port of the frontend computeActualMarks() (lib/assessment-utils.ts).
+     * Computes the achieved actual score from the structured green elements
+     * and the actual answers. Kept in sync with the client copy.
+     */
+    private function computeActualMarks($greenElements, array $pd): int
+    {
+        $checkedItems = $pd['actual_checked_items'] ?? [];
+        $checkedOptions = $pd['actual_checked_options'] ?? [];
+        $selectedSelections = $pd['actual_selected_items'] ?? [];
+        $checkedSubitems = $pd['actual_checked_subitems'] ?? [];
+        $customInputs = $pd['actual_custom_inputs'] ?? [];
+
+        $checkedItemsCast = array_map('intval', (array)$checkedItems);
+
+        $total = 0;
+        foreach ($greenElements as $criterion) {
+            $allItems = [];
+            if (is_array($criterion['items'] ?? null)) {
+                $allItems = array_merge($allItems, $criterion['items']);
+            }
+            if (is_array($criterion['subcriteria'] ?? null)) {
+                foreach ($criterion['subcriteria'] as $sub) {
+                    if (is_array($sub['items'] ?? null)) {
+                        $allItems = array_merge($allItems, $sub['items']);
+                    }
+                }
+            }
+
+            foreach ($allItems as $item) {
+                $optionGroups = is_array($item['option_groups'] ?? null) ? $item['option_groups'] : [];
+                $selectionGroups = is_array($item['selection_groups'] ?? null) ? $item['selection_groups'] : [];
+                $subitems = is_array($item['subitems'] ?? null) ? $item['subitems'] : [];
+                $hasSubitems = !empty($item['subitems_exist']) && count($subitems) > 0;
+                $hasSelections = false;
+                foreach ($selectionGroups as $g) {
+                    if (is_array($g['selections'] ?? null) && count($g['selections']) > 0) {
+                        $hasSelections = true;
+                        break;
+                    }
+                }
+                $hasOptions = false;
+                foreach ($optionGroups as $g) {
+                    if (is_array($g['options'] ?? null) && count($g['options']) > 0) {
+                        $hasOptions = true;
+                        break;
+                    }
+                }
+                $itemId = (int)($item['id'] ?? 0);
+                $itemMarks = (int)($item['marks'] ?? 0);
+
+                if ($hasSubitems) {
+                    $checked = $checkedSubitems[$itemId] ?? [];
+                    $customList = $customInputs[$itemId] ?? [];
+                    $total += min(count($checked) + count($customList), $itemMarks ?: 6);
+                } elseif ($hasSelections && !$hasOptions) {
+                    foreach ($selectionGroups as $group) {
+                        $selId = $selectedSelections[(int)($group['id'] ?? 0)] ?? null;
+                        $marks = 0;
+                        foreach (($group['selections'] ?? []) as $sel) {
+                            if ((int)($sel['id'] ?? 0) === (int)$selId) {
+                                $marks = (int)($sel['marks'] ?? 0);
+                                break;
+                            }
+                        }
+                        $total += $marks;
+                    }
+                } elseif ($hasOptions && !$hasSelections) {
+                    foreach ($optionGroups as $group) {
+                        $ids = $checkedOptions[(int)($group['id'] ?? 0)] ?? [];
+                        $idsCast = array_map('intval', (array)$ids);
+                        foreach (($group['options'] ?? []) as $opt) {
+                            if (in_array((int)($opt['id'] ?? 0), $idsCast, true)) {
+                                $total += (int)($opt['marks'] ?? 0);
+                            }
+                        }
+                    }
+                } elseif ($hasSelections && $hasOptions) {
+                    foreach ($selectionGroups as $group) {
+                        $selId = $selectedSelections[(int)($group['id'] ?? 0)] ?? null;
+                        $marks = 0;
+                        foreach (($group['selections'] ?? []) as $sel) {
+                            if ((int)($sel['id'] ?? 0) === (int)$selId) {
+                                $marks = (int)($sel['marks'] ?? 0);
+                                break;
+                            }
+                        }
+                        $total += $marks;
+                    }
+                    foreach ($optionGroups as $group) {
+                        $ids = $checkedOptions[(int)($group['id'] ?? 0)] ?? [];
+                        $idsCast = array_map('intval', (array)$ids);
+                        foreach (($group['options'] ?? []) as $opt) {
+                            if (in_array((int)($opt['id'] ?? 0), $idsCast, true)) {
+                                $total += (int)($opt['marks'] ?? 0);
+                            }
+                        }
+                    }
+                } else {
+                    if (in_array($itemId, $checkedItemsCast, true)) {
+                        $total += $itemMarks ?: 0;
+                    }
+                }
+            }
+        }
+        return $total;
+    }
+
+
+    /**
      * Retrieve all projects to which the given user has added members via the
      * project chat's "add members" functionality.
      *

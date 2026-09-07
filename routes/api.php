@@ -106,6 +106,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/projects/{projectId}', [ProjectController::class, 'showSelectedProject'])
         ->middleware('project.viewer');
     Route::get('/users/{userId}/projects', [ProjectController::class, 'getUserProjects']);
+    Route::get('/users/{userId}/projects/actual-ratings', [ProjectController::class, 'getUserActualRatings']);
     Route::get('/users/{userId}/projects/added-by-me', [ProjectController::class, 'getUserAddedMemberProjects']);
     Route::get('/users/{userId}/projects/added-to-me', [ProjectController::class, 'getUserAddedProjects']);
     Route::get('/users/{userId}', [UserController::class, 'getUserById']);
@@ -137,7 +138,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
 
         Route::middleware('system.role:admin,super_admin')->prefix('admin')->group(function () {
-            Route::get('/dashboard', [DashboardController::class, 'index']              );
+            Route::get('/dashboard', DashboardController::class);
             Route::get('/users', [UserManagementController::class, 'index']);
             Route::patch('/users/{user}/role', [UserManagementController::class, 'updateRole']);
             Route::delete('/users/{user}', [UserManagementController::class, 'destroy']);
