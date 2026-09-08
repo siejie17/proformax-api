@@ -43,10 +43,8 @@ class AssessmentController extends Controller
 
         $query->when($request->filled('status'), function ($q) use ($request) {
             $status = (string) $request->string('status');
-            if ($status === 'awaiting_verification') {
-                $q->whereIn('assessment_status', ['submitted', 'pending_verification']);
-            } elseif ($status === 'changes_requested') {
-                $q->where('assessment_status', 'requires_changes');
+            if ($status === 'actual_review') {
+                $q->whereIn('assessment_status', ['submitted', 'pending_verification', 'requires_changes', 'verified']);
             } else {
                 $q->where('assessment_status', $status);
             }
@@ -173,119 +171,63 @@ class AssessmentController extends Controller
     {
         $this->ensureAccess($request, $project);
         $data = $request->validate([
-            'action' => ['required', Rule::in(['verify', 'certify', 'reject', 'reopen'])],
-            'remarks' => [
-                Rule::requiredIf(fn () => $request->input('action') === 'reject'),
-                'nullable',
-                'string',
-                'max:5000',
-                function ($attribute, $value, $fail) use ($request) {
-                    if ($request->input('action') !== 'reject') {
-                        return;
-                    }
-
-                    $feedback = trim((string) $value);
-                    $wordCount = count(preg_split('/\s+/u', $feedback, -1, PREG_SPLIT_NO_EMPTY));
-                    if (mb_strlen($feedback) < 80 || $wordCount < 12) {
-                        $fail('Change request feedback must be at least 80 characters and 12 words so the applicant receives clear, actionable guidance.');
-                    }
-                },
-            ],
+            'action' => ['required', Rule::in(['certify'])],
+            'remarks' => ['nullable', 'string', 'max:5000'],
         ]);
 
         $scoreReview = $this->scoreService->breakdown($project);
 
-        if ($data['action'] === 'certify') {
-            $existingCertificate = $project->certificates()->where('status', 'issued')->latest('id')->first();
-            if ($existingCertificate) {
-                $existingCertificate = $this->certificates->ensurePdf($existingCertificate);
+        $existingCertificate = $project->certificates()->where('status', 'issued')->latest('id')->first();
+        if ($existingCertificate) {
+            $existingCertificate = $this->certificates->ensurePdf($existingCertificate);
 
-                return response()->json([
-                    'message' => 'The project certificate has already been issued.',
-                    'assessment' => $project->fresh(),
-                    'review' => $existingCertificate->assessmentReview?->load('reviewer:id,first_name,last_name,email'),
-                    'score_review' => $scoreReview,
-                    'certificate' => $this->certificates->payload($existingCertificate),
-                ]);
-            }
-        }
-
-        if ($data['action'] === 'reopen') {
-            if (! $request->user()->hasSystemRole('admin', 'super_admin', 'facilitator_admin')) {
-                abort(403, 'Only an administrator or the appointed Facilitator Admin can undo a Require changes decision.');
-            }
-
-            if ($project->assessment_status !== 'requires_changes') {
-                return response()->json([
-                    'message' => 'Only a project requiring changes can be reopened.',
-                ], 422);
-            }
-        }
-
-        if (in_array($data['action'], ['verify', 'reject'], true)
-            && in_array($project->assessment_status, ['verified', 'certified', 'requires_changes'], true)) {
             return response()->json([
-                'message' => 'The Predicted assessment decision is final for this project version.',
+                'message' => 'The project certificate has already been issued.',
+                'assessment' => $project->fresh(),
+                'review' => $existingCertificate->assessmentReview?->load('reviewer:id,first_name,last_name,email'),
+                'score_review' => $scoreReview,
+                'certificate' => $this->certificates->payload($existingCertificate),
+            ]);
+        }
+
+        if (! $project->allowsActualReview()) {
+            return response()->json([
+                'message' => 'The Predicted assessment must be submitted before the Actual assessment can be reviewed.',
             ], 422);
         }
 
-        if ($data['action'] === 'certify') {
-            if (! in_array($project->assessment_status, ['verified', 'certified'], true)) {
-                return response()->json([
-                    'message' => 'Verify the Predicted assessment before reviewing and certifying the Actual assessment.',
-                ], 422);
-            }
-
-            if (! $scoreReview['all_actual_reviewed'] || $scoreReview['total_items'] === 0) {
-                return response()->json([
-                    'message' => 'Review and save the Actual score for every assessment item before certifying.',
-                ], 422);
-            }
+        if (! $scoreReview['all_actual_reviewed'] || $scoreReview['total_items'] === 0) {
+            return response()->json([
+                'message' => 'Review and save the Actual score for every assessment item before certifying.',
+            ], 422);
         }
 
-        if ($data['action'] === 'certify' && ($scoreReview['calculated_certification_level'] === null || $scoreReview['calculated_certification_level'] === 'Not Certified')) {
+        if ($scoreReview['calculated_certification_level'] === null || $scoreReview['calculated_certification_level'] === 'Not Certified') {
             return response()->json([
                 'message' => 'The Actual total does not qualify for a configured certification level.',
             ], 422);
         }
 
         $previous = $project->assessment_status;
-        $newStatus = match ($data['action']) {
-            'verify' => 'verified',
-            'certify' => 'certified',
-            'reject' => 'requires_changes',
-            'reopen' => AssessmentReview::query()
-                ->where('project_id', $project->id)
-                ->where('action', 'reject')
-                ->where('new_status', 'requires_changes')
-                ->latest('id')
-                ->value('previous_status') ?: 'submitted',
-        };
-        if ($data['action'] === 'reopen' && ! in_array($newStatus, ['submitted', 'pending_verification', 'verified', 'certified'], true)) {
-            $newStatus = 'submitted';
-        }
-        $approvedActualTotal = $data['action'] === 'certify' ? $scoreReview['actual_total'] : null;
-        $certificationLevel = $data['action'] === 'certify'
-            ? $scoreReview['calculated_certification_level']
-            : null;
+        $newStatus = 'certified';
+        $approvedActualTotal = $scoreReview['actual_total'];
+        $certificationLevel = $scoreReview['calculated_certification_level'];
 
         $certificate = null;
         $alreadyIssued = false;
         $reviewRecord = DB::transaction(function () use ($request, $project, $data, $previous, $newStatus, $approvedActualTotal, $certificationLevel, $scoreReview, &$certificate, &$alreadyIssued) {
-            if ($data['action'] === 'certify') {
-                $project = Project::query()->lockForUpdate()->findOrFail($project->id);
-                $certificate = $project->certificates()->where('status', 'issued')->latest('id')->first();
-                if ($certificate) {
-                    $alreadyIssued = true;
+            $project = Project::query()->lockForUpdate()->findOrFail($project->id);
+            $certificate = $project->certificates()->where('status', 'issued')->latest('id')->first();
+            if ($certificate) {
+                $alreadyIssued = true;
 
-                    return $certificate->assessmentReview()->firstOrFail();
-                }
+                return $certificate->assessmentReview()->firstOrFail();
             }
 
             $reviewRecord = AssessmentReview::create([
                 'project_id' => $project->id,
                 'user_id' => $request->user()->id,
-                'action' => $data['action'],
+                'action' => 'certify',
                 'previous_status' => $previous,
                 'new_status' => $newStatus,
                 'approved_actual_total' => $approvedActualTotal,
@@ -293,21 +235,14 @@ class AssessmentController extends Controller
                 'remarks' => $data['remarks'] ?? null,
             ]);
 
-            $project->update($data['action'] === 'reopen'
-                ? [
-                    'assessment_status' => $newStatus,
-                    'reviewed_by' => null,
-                    'reviewed_at' => null,
-                    'review_remarks' => null,
-                ]
-                : [
-                    'assessment_status' => $newStatus,
-                    'reviewed_by' => $request->user()->id,
-                    'reviewed_at' => now(),
-                    'review_remarks' => $data['remarks'] ?? null,
-                ]);
+            $project->update([
+                'assessment_status' => $newStatus,
+                'reviewed_by' => $request->user()->id,
+                'reviewed_at' => now(),
+                'review_remarks' => $data['remarks'] ?? null,
+            ]);
 
-            ActivityLogger::record($request->user(), 'assessment_' . $data['action'], $project, 'success', [
+            ActivityLogger::record($request->user(), 'assessment_certify', $project, 'success', [
                 'from_status' => $previous,
                 'to_status' => $newStatus,
                 'approved_actual_total' => $approvedActualTotal,
@@ -315,14 +250,12 @@ class AssessmentController extends Controller
                 'remarks' => $data['remarks'] ?? null,
             ]);
 
-            if ($data['action'] === 'certify') {
-                $certificate = $this->certificates->issue(
-                    $project->fresh(),
-                    $reviewRecord,
-                    $request->user(),
-                    $scoreReview,
-                );
-            }
+            $certificate = $this->certificates->issue(
+                $project->fresh(),
+                $reviewRecord,
+                $request->user(),
+                $scoreReview,
+            );
 
             return $reviewRecord;
         });
@@ -343,13 +276,12 @@ class AssessmentController extends Controller
 
         $owner = $project->owner;
         if ($owner && (int) $owner->id !== (int) $request->user()->id) {
-            $decision = match ($data['action']) {
-                'verify' => ['Assessment verified', 'The Predicted assessment for '.$project->name.' was verified.'],
-                'certify' => ['Assessment certified', 'The Actual assessment for '.$project->name.' was certified.'],
-                'reject' => ['Assessment requires changes', 'Changes were requested for '.$project->name.'.'],
-                'reopen' => ['Assessment review reopened', 'The review decision for '.$project->name.' was reopened.'],
-            };
-            $this->notifications->deliver($owner, $decision[0], $decision[1], '/projects/'.$project->id);
+            $this->notifications->deliver(
+                $owner,
+                'Assessment certified',
+                'The Actual assessment for '.$project->name.' was certified.',
+                '/projects/'.$project->id,
+            );
         }
 
         return response()->json([
@@ -374,9 +306,9 @@ class AssessmentController extends Controller
     {
         $this->ensureAccess($request, $project);
 
-        if (! in_array($project->assessment_status, ['verified', 'certified'], true)) {
+        if (! $project->allowsActualReview()) {
             return response()->json([
-                'message' => 'The Predicted assessment must be verified before the Actual assessment can be reviewed.',
+                'message' => 'The Predicted assessment must be submitted before the Actual assessment can be reviewed.',
             ], 422);
         }
 
@@ -469,7 +401,7 @@ class AssessmentController extends Controller
                     'Actual assessment selections changed after certificate issuance.',
                 );
                 $project->update([
-                    'assessment_status' => 'verified',
+                    'assessment_status' => 'submitted',
                     'reviewed_by' => null,
                     'reviewed_at' => null,
                     'review_remarks' => null,
@@ -477,8 +409,8 @@ class AssessmentController extends Controller
 
                 ActivityLogger::record($request->user(), 'assessment_approval_invalidated', $project, 'success', [
                     'from_status' => $previousStatus,
-                    'to_status' => 'verified',
-                    'reason' => 'Actual selections were changed after certification; Predicted verification remains valid.',
+                    'to_status' => 'submitted',
+                    'reason' => 'Actual selections were changed after certification and require review again.',
                 ]);
             }
 

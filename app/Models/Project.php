@@ -9,6 +9,14 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Project extends Model
 {
+    public const ACTUAL_REVIEW_STATUSES = [
+        'submitted',
+        'pending_verification',
+        'verified',
+        'requires_changes',
+        'certified',
+    ];
+
     protected $fillable = [
         'user_id',
         'name',
@@ -34,6 +42,11 @@ class Project extends Model
     ];
 
     public $timestamps = false;
+
+    public function allowsActualReview(): bool
+    {
+        return in_array($this->assessment_status, self::ACTUAL_REVIEW_STATUSES, true);
+    }
 
     public function buildingType()
     {

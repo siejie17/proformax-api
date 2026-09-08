@@ -7,11 +7,13 @@ use App\Models\AssessmentItemReview;
 use App\Models\Project;
 use App\Models\Role;
 use App\Models\User;
+use App\Notifications\ProjectActivityEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -410,7 +412,7 @@ class SystemRoleAuthorizationTest extends TestCase
         ]);
     }
 
-    public function test_dashboard_groups_submission_states_into_awaiting_verification(): void
+    public function test_dashboard_groups_non_certified_legacy_states_into_actual_review(): void
     {
         $submitted = $this->project($this->user('user'));
         $legacyPending = $this->project($this->user('user'));
@@ -425,23 +427,23 @@ class SystemRoleAuthorizationTest extends TestCase
 
         $this->getJson('/api/administration/admin/dashboard')
             ->assertOk()
-            ->assertJsonPath('status_distribution.awaiting_verification', 2)
-            ->assertJsonPath('status_distribution.changes_requested', 1)
-            ->assertJsonPath('status_distribution.verified', 1)
+            ->assertJsonPath('status_distribution.actual_review', 4)
             ->assertJsonPath('status_distribution.certified', 1)
-            ->assertJsonPath('metrics.pending', 2)
-            ->assertJsonPath('metrics.verified', 1)
+            ->assertJsonPath('metrics.actual_review', 4)
             ->assertJsonMissingPath('status_distribution.submitted')
             ->assertJsonMissingPath('status_distribution.pending_verification')
-            ->assertJsonMissingPath('status_distribution.requires_changes');
+            ->assertJsonMissingPath('status_distribution.requires_changes')
+            ->assertJsonMissingPath('status_distribution.verified');
 
-        $awaitingIds = collect($this->getJson('/api/administration/admin/assessments?status=awaiting_verification')
+        $actualReviewIds = collect($this->getJson('/api/administration/admin/assessments?status=actual_review')
             ->assertOk()
             ->json('data'))
             ->pluck('id');
-        $this->assertTrue($awaitingIds->contains($submitted->id));
-        $this->assertTrue($awaitingIds->contains($legacyPending->id));
-        $this->assertFalse($awaitingIds->contains($verified->id));
+        $this->assertTrue($actualReviewIds->contains($submitted->id));
+        $this->assertTrue($actualReviewIds->contains($legacyPending->id));
+        $this->assertTrue($actualReviewIds->contains($changesRequested->id));
+        $this->assertTrue($actualReviewIds->contains($verified->id));
+        $this->assertFalse($actualReviewIds->contains($certified->id));
     }
 
     public function test_admin_can_load_facilitators_with_their_active_project_assignments(): void
@@ -580,8 +582,16 @@ class SystemRoleAuthorizationTest extends TestCase
         $this->patchJson("/api/administration/facilitator/assessments/{$project->id}/actual-selections", [
             'items' => [['item_id' => $itemId, 'accepted_choice_keys' => ["item:{$itemId}"]]],
         ])->assertForbidden();
+        $this->postJson("/api/projects/{$project->id}/save-actual-changes", [
+            'actualChanges' => [[
+                'type' => 'item',
+                'action' => 'add',
+                'itemId' => $itemId,
+            ]],
+        ])->assertForbidden()
+            ->assertJsonPath('message', 'You are not appointed to this project.');
         $this->postJson("/api/administration/facilitator/assessments/{$project->id}/review", [
-            'action' => 'verify',
+            'action' => 'certify',
         ])->assertForbidden();
     }
 
@@ -634,7 +644,7 @@ class SystemRoleAuthorizationTest extends TestCase
         $admin = $this->user('admin');
         $project = $this->project($owner);
         $itemId = $this->assessmentItem($project, 4);
-        $project->update(['assessment_status' => 'verified']);
+        $this->assertDatabaseMissing('facilitator_assignments', ['project_id' => $project->id]);
 
         Sanctum::actingAs($owner);
         $this->post("/api/projects/{$project->id}/attachments", [
@@ -674,6 +684,101 @@ class SystemRoleAuthorizationTest extends TestCase
             ->assertJsonPath('message', 'A maximum of five evidence files can be submitted for each assessment item.');
 
         $this->assertDatabaseCount('attachments', 5);
+    }
+
+    public function test_reviewers_are_notified_only_when_every_predicted_item_has_evidence(): void
+    {
+        Storage::fake('public');
+        Notification::fake();
+        $owner = $this->user('user');
+        $admin = $this->user('admin');
+        $facilitator = $this->user('facilitator_admin');
+        $unrelatedFacilitator = $this->user('facilitator_admin');
+        $project = $this->project($owner);
+        $predictedItemIds = collect(range(1, 20))
+            ->map(fn () => $this->assessmentItem($project, 1));
+        $unselectedItemIds = collect(range(1, 15))
+            ->map(fn () => $this->assessmentItem($project, 1));
+        $predictedItemIds->each(fn (int $itemId) => $this->selectAssessmentItem($project, $owner, $itemId));
+        DB::table('facilitator_assignments')->insert([
+            'project_id' => $project->id,
+            'user_id' => $facilitator->id,
+            'appointed_by' => $admin->id,
+            'status' => 'active',
+            'appointed_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        Sanctum::actingAs($owner);
+
+        foreach ($predictedItemIds->take(19) as $itemId) {
+            $this->post("/api/projects/{$project->id}/attachments", [
+                'file' => UploadedFile::fake()->create("predicted-evidence-{$itemId}.pdf", 20, 'application/pdf'),
+                'assessment_item_id' => $itemId,
+            ], ['Accept' => 'application/json'])->assertCreated();
+        }
+        $this->post("/api/projects/{$project->id}/attachments", [
+            'file' => UploadedFile::fake()->create('non-predicted-evidence-1.pdf', 20, 'application/pdf'),
+            'assessment_item_id' => $unselectedItemIds->first(),
+        ], ['Accept' => 'application/json'])->assertCreated();
+
+        $this->assertDatabaseCount('attachments', 20);
+        Notification::assertNothingSent();
+
+        foreach ($unselectedItemIds->skip(1) as $itemId) {
+            $this->post("/api/projects/{$project->id}/attachments", [
+                'file' => UploadedFile::fake()->create("non-predicted-evidence-{$itemId}.pdf", 20, 'application/pdf'),
+                'assessment_item_id' => $itemId,
+            ], ['Accept' => 'application/json'])->assertCreated();
+        }
+        foreach (range(1, 4) as $duplicate) {
+            $this->post("/api/projects/{$project->id}/attachments", [
+                'file' => UploadedFile::fake()->create("duplicate-predicted-evidence-{$duplicate}.pdf", 20, 'application/pdf'),
+                'assessment_item_id' => $predictedItemIds->first(),
+            ], ['Accept' => 'application/json'])->assertCreated();
+        }
+        Notification::assertNothingSent();
+
+        $missingPredictedItemId = $predictedItemIds->last();
+        $finalUpload = $this->post("/api/projects/{$project->id}/attachments", [
+            'file' => UploadedFile::fake()->create('final-predicted-evidence.pdf', 20, 'application/pdf'),
+            'assessment_item_id' => $missingPredictedItemId,
+        ], ['Accept' => 'application/json'])->assertCreated();
+
+        Notification::assertSentTo([$admin, $facilitator], ProjectActivityEmail::class);
+        Notification::assertNotSentTo($owner, ProjectActivityEmail::class);
+        Notification::assertNotSentTo($unrelatedFacilitator, ProjectActivityEmail::class);
+        Notification::assertCount(2);
+        $readyLog = ActivityLog::where('target_type', $project->getMorphClass())
+            ->where('target_id', $project->id)
+            ->where('action', 'assessment_evidence_ready')
+            ->latest('id')
+            ->firstOrFail();
+        $this->assertSame(20, $readyLog->metadata['predicted_items']);
+        $this->assertSame(20, $readyLog->metadata['items_with_evidence']);
+
+        $this->post("/api/projects/{$project->id}/attachments", [
+            'file' => UploadedFile::fake()->create('additional-non-predicted-evidence.pdf', 20, 'application/pdf'),
+            'assessment_item_id' => $unselectedItemIds->first(),
+        ], ['Accept' => 'application/json'])->assertCreated();
+        Notification::assertCount(2);
+
+        $this->deleteJson("/api/projects/{$project->id}/attachments/{$finalUpload->json('data.id')}")
+            ->assertOk();
+        $incompleteLog = ActivityLog::where('target_type', $project->getMorphClass())
+            ->where('target_id', $project->id)
+            ->where('action', 'assessment_evidence_incomplete')
+            ->latest('id')
+            ->firstOrFail();
+        $this->assertSame(20, $incompleteLog->metadata['predicted_items']);
+        $this->assertSame(19, $incompleteLog->metadata['items_with_evidence']);
+
+        $this->post("/api/projects/{$project->id}/attachments", [
+            'file' => UploadedFile::fake()->create('replacement-final-evidence.pdf', 20, 'application/pdf'),
+            'assessment_item_id' => $missingPredictedItemId,
+        ], ['Accept' => 'application/json'])->assertCreated();
+        Notification::assertCount(4);
+        Notification::assertNotSentTo($unrelatedFacilitator, ProjectActivityEmail::class);
     }
 
     public function test_owner_and_admin_can_remove_item_evidence_but_unrelated_user_cannot(): void
@@ -880,7 +985,7 @@ class SystemRoleAuthorizationTest extends TestCase
             ->assertJsonPath('certificate.revocation_reason', 'A corrected final review is required.');
         $this->assertDatabaseHas('projects', [
             'id' => $project->id,
-            'assessment_status' => 'verified',
+            'assessment_status' => 'submitted',
         ]);
         $this->get("/api/projects/{$project->id}/certificate/download")->assertNotFound();
         $this->getJson("/api/certificates/verify/{$verificationCode}")
@@ -903,10 +1008,9 @@ class SystemRoleAuthorizationTest extends TestCase
                 ['item_id' => $secondItemId, 'accepted_choice_keys' => []],
             ],
         ])->assertOk()
-            ->assertJsonPath('assessment.assessment_status', 'verified')
+            ->assertJsonPath('assessment.assessment_status', 'submitted')
             ->assertJsonPath('assessment.review_remarks', null)
             ->assertJsonPath('score_review.actual_total', 5)
-            ->assertJsonPath('score_review.verification_status', 'verified')
             ->assertJsonPath('score_review.certification_status', 'not_certified');
 
         $this->assertDatabaseHas('assessment_reviews', [
@@ -992,7 +1096,7 @@ class SystemRoleAuthorizationTest extends TestCase
             ->assertJsonPath('score_review.items.0.predicted_choices.1.selected', false)
             ->assertJsonPath('score_review.items.0.predicted_choices.2.selected', true)
             ->assertJsonPath('score_review.items.0.predicted_choices.2.score', 1)
-            ->assertJsonPath('score_review.actual_total', 2)
+            ->assertJsonPath('score_review.actual_total', 0)
             ->assertJsonPath('score_review.items.0.actual_choices.0.label', 'Individual switching (≤100 m² zones)')
             ->assertJsonPath('score_review.items.0.actual_choices.0.score', 1)
             ->assertJsonPath('score_review.items.0.actual_choices.1.submitted', false)
@@ -1046,8 +1150,8 @@ class SystemRoleAuthorizationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('score_review.items.0.review_status', 'pending')
             ->assertJsonPath('score_review.items.0.actual_choices.2.submitted', true)
-            ->assertJsonPath('score_review.items.0.actual_choices.2.accepted', true)
-            ->assertJsonPath('score_review.actual_total', 3);
+            ->assertJsonPath('score_review.items.0.actual_choices.2.accepted', false)
+            ->assertJsonPath('score_review.actual_total', 0);
     }
 
     public function test_assigned_facilitator_can_view_predicted_and_actual_and_review_actual(): void
@@ -1075,10 +1179,12 @@ class SystemRoleAuthorizationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('score_review.items.0.predicted_score', 4)
             ->assertJsonPath('score_review.items.0.predicted_selections.0', 'Selected')
-            ->assertJsonPath('score_review.items.0.actual_score', 4)
+            ->assertJsonPath('score_review.items.0.actual_score', 0)
             ->assertJsonPath('score_review.items.0.actual_selections.0', 'Selected')
             ->assertJsonPath('score_review.predicted_total', 4)
-            ->assertJsonPath('score_review.actual_total', 4);
+            ->assertJsonPath('score_review.actual_total', 0)
+            ->assertJsonPath('score_review.reviewed_items', 0)
+            ->assertJsonPath('score_review.all_actual_reviewed', false);
 
         $this->patchJson("/api/administration/facilitator/assessments/{$project->id}/actual-selections", [
             'items' => [['item_id' => $itemId, 'accepted_choice_keys' => []]],
@@ -1100,7 +1206,56 @@ class SystemRoleAuthorizationTest extends TestCase
         $this->assertDatabaseHas('projects', ['id' => $project->id, 'rating' => 70]);
         $this->assertDatabaseHas('user_answers', ['project_id' => $project->id, 'item_id' => $itemId]);
         $this->assertDatabaseMissing('actual_user_answers', ['id' => $answerId]);
-        $this->assertDatabaseHas('activity_logs', ['user_id' => $facilitator->id, 'action' => 'assessment_actual_item_adjusted']);
+        $this->assertDatabaseHas('activity_logs', ['user_id' => $facilitator->id, 'action' => 'assessment_actual_review_saved']);
+    }
+
+    public function test_actual_review_progress_counts_only_explicitly_saved_item_decisions(): void
+    {
+        $owner = $this->user('user');
+        $admin = $this->user('admin');
+        $project = $this->project($owner);
+        $project->update(['assessment_status' => 'verified']);
+        $firstItemId = $this->assessmentItem($project, 1);
+        $secondItemId = $this->assessmentItem($project, 2);
+        $this->selectActualAssessmentItem($project, $owner, $firstItemId);
+        $this->selectActualAssessmentItem($project, $owner, $secondItemId);
+        Sanctum::actingAs($admin);
+
+        $this->getJson("/api/administration/admin/assessments/{$project->id}")
+            ->assertOk()
+            ->assertJsonPath('score_review.reviewed_items', 0)
+            ->assertJsonPath('score_review.total_items', 2)
+            ->assertJsonPath('score_review.all_actual_reviewed', false)
+            ->assertJsonPath('score_review.actual_total', 0)
+            ->assertJsonPath('score_review.items.0.review_status', 'pending')
+            ->assertJsonPath('score_review.items.1.review_status', 'pending');
+
+        $this->patchJson("/api/administration/admin/assessments/{$project->id}/actual-selections", [
+            'items' => [['item_id' => $firstItemId, 'accepted_choice_keys' => []]],
+        ])->assertOk()
+            ->assertJsonPath('score_review.reviewed_items', 1)
+            ->assertJsonPath('score_review.total_items', 2)
+            ->assertJsonPath('score_review.all_actual_reviewed', false)
+            ->assertJsonPath('score_review.items.0.review_status', 'reviewed')
+            ->assertJsonPath('score_review.items.0.actual_score', 0)
+            ->assertJsonPath('score_review.items.1.review_status', 'pending');
+
+        $this->assertDatabaseHas('assessment_item_reviews', [
+            'project_id' => $project->id,
+            'item_id' => $firstItemId,
+            'reviewed_score' => 0,
+            'review_basis' => 'actual',
+        ]);
+        $this->assertDatabaseMissing('assessment_item_reviews', [
+            'project_id' => $project->id,
+            'item_id' => $secondItemId,
+        ]);
+
+        $this->getJson("/api/administration/admin/assessments/{$project->id}")
+            ->assertOk()
+            ->assertJsonPath('score_review.reviewed_items', 1)
+            ->assertJsonPath('score_review.items.0.review_status', 'reviewed')
+            ->assertJsonPath('score_review.items.1.review_status', 'pending');
     }
 
     public function test_superadmin_can_adjust_an_actual_value_through_admin_assessment_route(): void
@@ -1141,7 +1296,9 @@ class SystemRoleAuthorizationTest extends TestCase
         $this->getJson("/api/administration/admin/assessments/{$project->id}")
             ->assertOk()
             ->assertJsonPath('score_review.predicted_total', 5)
-            ->assertJsonPath('score_review.actual_total', 5);
+            ->assertJsonPath('score_review.actual_total', 0)
+            ->assertJsonPath('score_review.reviewed_items', 0)
+            ->assertJsonPath('score_review.all_actual_reviewed', false);
 
         $this->patchJson("/api/administration/admin/assessments/{$project->id}/actual-selections", [
             'items' => [['item_id' => $itemId, 'accepted_choice_keys' => ["item:{$itemId}"]]],
@@ -1156,7 +1313,7 @@ class SystemRoleAuthorizationTest extends TestCase
         ]);
     }
 
-    public function test_prediction_is_verified_before_actual_certification_review(): void
+    public function test_submitted_prediction_allows_actual_review_without_verification_or_facilitator(): void
     {
         $owner = $this->user('user');
         $admin = $this->user('admin');
@@ -1166,15 +1323,11 @@ class SystemRoleAuthorizationTest extends TestCase
         Sanctum::actingAs($admin);
         $this->assertDatabaseMissing('facilitator_assignments', ['project_id' => $project->id]);
 
-        $this->postJson("/api/administration/admin/assessments/{$project->id}/review", [
-            'action' => 'verify',
-        ])->assertOk()
-            ->assertJsonPath('assessment.assessment_status', 'verified')
-            ->assertJsonPath('review.approved_actual_total', null);
-
         $this->patchJson("/api/administration/admin/assessments/{$project->id}/actual-selections", [
             'items' => [['item_id' => $reviewedItemId, 'accepted_choice_keys' => ["item:{$reviewedItemId}"]]],
-        ])->assertOk();
+        ])->assertOk()
+            ->assertJsonPath('assessment.assessment_status', 'submitted')
+            ->assertJsonPath('score_review.items.0.actual_score', 5);
 
         $this->postJson("/api/administration/admin/assessments/{$project->id}/review", [
             'action' => 'certify',
@@ -1183,11 +1336,11 @@ class SystemRoleAuthorizationTest extends TestCase
 
         $this->assertDatabaseHas('projects', [
             'id' => $project->id,
-            'assessment_status' => 'verified',
+            'assessment_status' => 'submitted',
         ]);
     }
 
-    public function test_requiring_prediction_changes_needs_remarks_and_retires_project_version(): void
+    public function test_predicted_verification_actions_are_retired_and_legacy_changes_records_remain_reviewable(): void
     {
         Storage::fake('public');
         $owner = $this->user('user');
@@ -1196,62 +1349,38 @@ class SystemRoleAuthorizationTest extends TestCase
         $itemId = $this->assessmentItem($project, 5);
         Sanctum::actingAs($admin);
 
-        $this->postJson("/api/administration/admin/assessments/{$project->id}/review", [
-            'action' => 'reject',
-        ])->assertUnprocessable()
-            ->assertJsonValidationErrors('remarks');
+        foreach (['verify', 'reject', 'reopen'] as $retiredAction) {
+            $this->postJson("/api/administration/admin/assessments/{$project->id}/review", [
+                'action' => $retiredAction,
+            ])->assertUnprocessable()
+                ->assertJsonValidationErrors('action');
+        }
 
-        $this->postJson("/api/administration/admin/assessments/{$project->id}/review", [
-            'action' => 'reject',
-            'remarks' => 'This is not good. Please change it.',
-        ])->assertUnprocessable()
-            ->assertJsonValidationErrors('remarks');
-
-        $remark = 'Revise the energy strategy to identify the missing efficiency measures, then upload the corrected calculation sheet and supporting energy model for review.';
-        $this->postJson("/api/administration/admin/assessments/{$project->id}/review", [
-            'action' => 'reject',
-            'remarks' => $remark,
-        ])->assertOk()
-            ->assertJsonPath('assessment.assessment_status', 'requires_changes')
-            ->assertJsonPath('assessment.review_remarks', $remark);
-
-        $this->postJson("/api/administration/admin/assessments/{$project->id}/review", [
-            'action' => 'verify',
-        ])->assertUnprocessable()
-            ->assertJsonPath('message', 'The Predicted assessment decision is final for this project version.');
+        $project->update([
+            'assessment_status' => 'requires_changes',
+            'review_remarks' => 'Historical Predicted change request retained for audit compatibility.',
+        ]);
 
         $this->patchJson("/api/administration/admin/assessments/{$project->id}/actual-selections", [
             'items' => [['item_id' => $itemId, 'accepted_choice_keys' => []]],
-        ])->assertUnprocessable();
+        ])->assertOk()
+            ->assertJsonPath('assessment.assessment_status', 'requires_changes');
 
         Sanctum::actingAs($owner);
         $this->post("/api/projects/{$project->id}/attachments", [
             'file' => UploadedFile::fake()->create('construction-evidence.pdf', 20, 'application/pdf'),
             'assessment_item_id' => $itemId,
         ], ['Accept' => 'application/json'])
-            ->assertUnprocessable()
-            ->assertJsonPath('message', 'Evidence can be submitted only after the Predicted assessment is verified.');
+            ->assertCreated();
 
-        Sanctum::actingAs($admin);
-        $this->postJson("/api/administration/admin/assessments/{$project->id}/review", [
-            'action' => 'reopen',
-        ])->assertOk()
-            ->assertJsonPath('assessment.assessment_status', 'submitted')
-            ->assertJsonPath('assessment.review_remarks', null)
-            ->assertJsonPath('review.action', 'reopen')
-            ->assertJsonPath('review.previous_status', 'requires_changes')
-            ->assertJsonPath('review.new_status', 'submitted');
-
-        $this->assertDatabaseHas('assessment_reviews', [
-            'project_id' => $project->id,
-            'action' => 'reopen',
-            'previous_status' => 'requires_changes',
-            'new_status' => 'submitted',
-            'user_id' => $admin->id,
+        $this->assertDatabaseHas('projects', [
+            'id' => $project->id,
+            'assessment_status' => 'requires_changes',
         ]);
+        $this->assertDatabaseMissing('assessment_reviews', ['project_id' => $project->id]);
     }
 
-    public function test_appointed_facilitator_can_verify_and_certify_a_project(): void
+    public function test_appointed_facilitator_can_review_and_certify_a_submitted_project(): void
     {
         Storage::fake('local');
         $owner = $this->user('user');
@@ -1270,28 +1399,6 @@ class SystemRoleAuthorizationTest extends TestCase
         ]);
 
         Sanctum::actingAs($facilitator);
-        $this->postJson("/api/administration/facilitator/assessments/{$project->id}/review", [
-            'action' => 'reject',
-        ])->assertUnprocessable()
-            ->assertJsonValidationErrors('remarks');
-
-        $this->postJson("/api/administration/facilitator/assessments/{$project->id}/review", [
-            'action' => 'reject',
-            'remarks' => 'Please revise the Predicted submission by correcting the energy calculation assumptions and upload the updated model with supporting evidence for another review.',
-        ])->assertOk()
-            ->assertJsonPath('assessment.assessment_status', 'requires_changes');
-
-        $this->postJson("/api/administration/facilitator/assessments/{$project->id}/review", [
-            'action' => 'reopen',
-        ])->assertOk()
-            ->assertJsonPath('assessment.assessment_status', 'submitted')
-            ->assertJsonPath('assessment.review_remarks', null);
-
-        $this->postJson("/api/administration/facilitator/assessments/{$project->id}/review", [
-            'action' => 'verify',
-        ])->assertOk()
-            ->assertJsonPath('assessment.assessment_status', 'verified');
-
         $certification = [
             'name' => 'Gold',
             'min_score' => 5,
@@ -1305,7 +1412,8 @@ class SystemRoleAuthorizationTest extends TestCase
 
         $this->patchJson("/api/administration/facilitator/assessments/{$project->id}/actual-selections", [
             'items' => [['item_id' => $itemId, 'accepted_choice_keys' => ["item:{$itemId}"]]],
-        ])->assertOk();
+        ])->assertOk()
+            ->assertJsonPath('assessment.assessment_status', 'submitted');
 
         $this->postJson("/api/administration/facilitator/assessments/{$project->id}/review", [
             'action' => 'certify',
@@ -1318,7 +1426,7 @@ class SystemRoleAuthorizationTest extends TestCase
         $this->assertDatabaseHas('assessment_reviews', [
             'project_id' => $project->id,
             'user_id' => $facilitator->id,
-            'action' => 'reopen',
+            'action' => 'certify',
         ]);
         $this->assertDatabaseHas('project_certificates', [
             'project_id' => $project->id,

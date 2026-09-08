@@ -17,9 +17,10 @@ class DashboardController extends Controller
             ->groupBy('assessment_status')
             ->pluck('total', 'assessment_status');
         $statusCounts = collect([
-            'awaiting_verification' => (int) ($rawStatusCounts['submitted'] ?? 0) + (int) ($rawStatusCounts['pending_verification'] ?? 0),
-            'changes_requested' => (int) ($rawStatusCounts['requires_changes'] ?? 0),
-            'verified' => (int) ($rawStatusCounts['verified'] ?? 0),
+            'actual_review' => (int) ($rawStatusCounts['submitted'] ?? 0)
+                + (int) ($rawStatusCounts['pending_verification'] ?? 0)
+                + (int) ($rawStatusCounts['requires_changes'] ?? 0)
+                + (int) ($rawStatusCounts['verified'] ?? 0),
             'certified' => (int) ($rawStatusCounts['certified'] ?? 0),
         ]);
 
@@ -33,8 +34,7 @@ class DashboardController extends Controller
             'metrics' => [
                 'users' => User::where('system_role', 'user')->count(),
                 'assessments' => Project::count(),
-                'pending' => Project::whereIn('assessment_status', ['submitted', 'pending_verification'])->count(),
-                'verified' => Project::where('assessment_status', 'verified')->count(),
+                'actual_review' => Project::whereIn('assessment_status', ['submitted', 'pending_verification', 'requires_changes', 'verified'])->count(),
                 'facilitators' => User::where('system_role', 'facilitator_admin')->count(),
             ],
             'status_distribution' => $statusCounts,

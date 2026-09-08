@@ -67,7 +67,7 @@ class CertificateController extends Controller
         $certificate = $this->certificates->revokeActive($project, $request->user(), trim($data['reason']));
         abort_unless($certificate, 404, 'No active certificate has been issued for this project.');
         $project->update([
-            'assessment_status' => 'verified',
+            'assessment_status' => 'submitted',
             'reviewed_by' => null,
             'reviewed_at' => null,
             'review_remarks' => null,
