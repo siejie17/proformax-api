@@ -992,7 +992,7 @@ class SystemRoleAuthorizationTest extends TestCase
             ->assertJsonPath('score_review.items.0.predicted_choices.1.selected', false)
             ->assertJsonPath('score_review.items.0.predicted_choices.2.selected', true)
             ->assertJsonPath('score_review.items.0.predicted_choices.2.score', 1)
-            ->assertJsonPath('score_review.actual_total', 2)
+            ->assertJsonPath('score_review.actual_total', 0)
             ->assertJsonPath('score_review.items.0.actual_choices.0.label', 'Individual switching (≤100 m² zones)')
             ->assertJsonPath('score_review.items.0.actual_choices.0.score', 1)
             ->assertJsonPath('score_review.items.0.actual_choices.1.submitted', false)
@@ -1046,8 +1046,8 @@ class SystemRoleAuthorizationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('score_review.items.0.review_status', 'pending')
             ->assertJsonPath('score_review.items.0.actual_choices.2.submitted', true)
-            ->assertJsonPath('score_review.items.0.actual_choices.2.accepted', true)
-            ->assertJsonPath('score_review.actual_total', 3);
+            ->assertJsonPath('score_review.items.0.actual_choices.2.accepted', false)
+            ->assertJsonPath('score_review.actual_total', 0);
     }
 
     public function test_assigned_facilitator_can_view_predicted_and_actual_and_review_actual(): void
@@ -1075,10 +1075,12 @@ class SystemRoleAuthorizationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('score_review.items.0.predicted_score', 4)
             ->assertJsonPath('score_review.items.0.predicted_selections.0', 'Selected')
-            ->assertJsonPath('score_review.items.0.actual_score', 4)
+            ->assertJsonPath('score_review.items.0.actual_score', 0)
             ->assertJsonPath('score_review.items.0.actual_selections.0', 'Selected')
             ->assertJsonPath('score_review.predicted_total', 4)
-            ->assertJsonPath('score_review.actual_total', 4);
+            ->assertJsonPath('score_review.actual_total', 0)
+            ->assertJsonPath('score_review.reviewed_items', 0)
+            ->assertJsonPath('score_review.all_actual_reviewed', false);
 
         $this->patchJson("/api/administration/facilitator/assessments/{$project->id}/actual-selections", [
             'items' => [['item_id' => $itemId, 'accepted_choice_keys' => []]],
@@ -1100,7 +1102,56 @@ class SystemRoleAuthorizationTest extends TestCase
         $this->assertDatabaseHas('projects', ['id' => $project->id, 'rating' => 70]);
         $this->assertDatabaseHas('user_answers', ['project_id' => $project->id, 'item_id' => $itemId]);
         $this->assertDatabaseMissing('actual_user_answers', ['id' => $answerId]);
-        $this->assertDatabaseHas('activity_logs', ['user_id' => $facilitator->id, 'action' => 'assessment_actual_item_adjusted']);
+        $this->assertDatabaseHas('activity_logs', ['user_id' => $facilitator->id, 'action' => 'assessment_actual_review_saved']);
+    }
+
+    public function test_actual_review_progress_counts_only_explicitly_saved_item_decisions(): void
+    {
+        $owner = $this->user('user');
+        $admin = $this->user('admin');
+        $project = $this->project($owner);
+        $project->update(['assessment_status' => 'verified']);
+        $firstItemId = $this->assessmentItem($project, 1);
+        $secondItemId = $this->assessmentItem($project, 2);
+        $this->selectActualAssessmentItem($project, $owner, $firstItemId);
+        $this->selectActualAssessmentItem($project, $owner, $secondItemId);
+        Sanctum::actingAs($admin);
+
+        $this->getJson("/api/administration/admin/assessments/{$project->id}")
+            ->assertOk()
+            ->assertJsonPath('score_review.reviewed_items', 0)
+            ->assertJsonPath('score_review.total_items', 2)
+            ->assertJsonPath('score_review.all_actual_reviewed', false)
+            ->assertJsonPath('score_review.actual_total', 0)
+            ->assertJsonPath('score_review.items.0.review_status', 'pending')
+            ->assertJsonPath('score_review.items.1.review_status', 'pending');
+
+        $this->patchJson("/api/administration/admin/assessments/{$project->id}/actual-selections", [
+            'items' => [['item_id' => $firstItemId, 'accepted_choice_keys' => []]],
+        ])->assertOk()
+            ->assertJsonPath('score_review.reviewed_items', 1)
+            ->assertJsonPath('score_review.total_items', 2)
+            ->assertJsonPath('score_review.all_actual_reviewed', false)
+            ->assertJsonPath('score_review.items.0.review_status', 'reviewed')
+            ->assertJsonPath('score_review.items.0.actual_score', 0)
+            ->assertJsonPath('score_review.items.1.review_status', 'pending');
+
+        $this->assertDatabaseHas('assessment_item_reviews', [
+            'project_id' => $project->id,
+            'item_id' => $firstItemId,
+            'reviewed_score' => 0,
+            'review_basis' => 'actual',
+        ]);
+        $this->assertDatabaseMissing('assessment_item_reviews', [
+            'project_id' => $project->id,
+            'item_id' => $secondItemId,
+        ]);
+
+        $this->getJson("/api/administration/admin/assessments/{$project->id}")
+            ->assertOk()
+            ->assertJsonPath('score_review.reviewed_items', 1)
+            ->assertJsonPath('score_review.items.0.review_status', 'reviewed')
+            ->assertJsonPath('score_review.items.1.review_status', 'pending');
     }
 
     public function test_superadmin_can_adjust_an_actual_value_through_admin_assessment_route(): void
@@ -1141,7 +1192,9 @@ class SystemRoleAuthorizationTest extends TestCase
         $this->getJson("/api/administration/admin/assessments/{$project->id}")
             ->assertOk()
             ->assertJsonPath('score_review.predicted_total', 5)
-            ->assertJsonPath('score_review.actual_total', 5);
+            ->assertJsonPath('score_review.actual_total', 0)
+            ->assertJsonPath('score_review.reviewed_items', 0)
+            ->assertJsonPath('score_review.all_actual_reviewed', false);
 
         $this->patchJson("/api/administration/admin/assessments/{$project->id}/actual-selections", [
             'items' => [['item_id' => $itemId, 'accepted_choice_keys' => ["item:{$itemId}"]]],
